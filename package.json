@@ -1,0 +1,21 @@
+{
+  "name": "hackwiki",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "lint": "oxlint --fix src test",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@hackmd/api": "^2.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "oxlint": "^1.60.0",
+    "typescript": "^5.4.0"
+  }
+}
