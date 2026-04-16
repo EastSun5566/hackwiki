@@ -1,6 +1,6 @@
 # Hackwiki
 
-A library for maintaining a persistent, LLM-friendly wiki backed by HackMD team notes.
+> A library for maintaining a persistent, LLM-friendly wiki backed by HackMD team notes
 
 ## Concept
 

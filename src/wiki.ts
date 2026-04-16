@@ -13,7 +13,6 @@ export interface WikiClient {
   updateTeamNote(teamPath: string, id: string, opts: Record<string, unknown>): Promise<unknown>
 }
 
-
 export interface WikiConfig {
   token: string
   teamPath: string
