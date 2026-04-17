@@ -20,7 +20,9 @@
     "build": "tsc --project tsconfig.build.json",
     "lint": "oxlint src test",
     "lint:fix": "oxlint --fix src test",
-    "test": "node --test"
+    "test": "node --test",
+    "prepublishOnly": "pnpm run build",
+    "release": "npx standard-version && git push --follow-tags && npm publish"
   },
   "repository": {
     "type": "git",
