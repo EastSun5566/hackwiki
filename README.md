@@ -1,6 +1,6 @@
 # Hackwiki
 
-> A library for maintaining a persistent, LLM-friendly wiki backed by HackMD team notes
+> A library for maintaining a persistent, LLM-friendly wiki backed by HackMD notes
 
 ## Concept
 
@@ -15,7 +15,7 @@ Pages have four types: `raw`, `concept`, `entity`, `synthesis`.
 ## Install
 
 ```sh
-pnpm add hackwiki
+npm install hackwiki
 ```
 
 ## Usage
@@ -25,16 +25,9 @@ import { createWiki } from "hackwiki";
 
 const wiki = createWiki({
   token: process.env.HACKMD_TOKEN,
-  teamPath: "my-team",
 });
 
-// First time: create the three meta notes
-const meta = await wiki.bootstrap();
-
-// Later: reuse existing meta notes
-wiki.load({ schemaId: "...", indexId: "...", logId: "..." });
-
-// Read current state for an LLM session
+// The first call auto-discovers or creates the reserved hackwiki notes
 const session = await wiki.startSession();
 // session.schema, session.index, session.recentLog
 
@@ -55,3 +48,5 @@ const results = await wiki.searchIndex("retrieval");
 // Lint for orphans and undocumented [[wiki-links]]
 const { orphanPages, undocumentedMentions } = await wiki.lint();
 ```
+
+By default, hackwiki stores its reserved notes directly in your HackMD personal space.

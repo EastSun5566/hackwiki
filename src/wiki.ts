@@ -1,21 +1,34 @@
 import HackMDAPI from '@hackmd/api'
 
 import { serializeIndex, parseIndex, formatLogEntry, parseRecentLog } from './parser.ts'
-import type { WikiMeta, WikiNoteType, WikiIndexEntry, WikiSession, LintReport } from './types.ts'
+import type { WikiNoteType, WikiIndexEntry, WikiSession, LintReport } from './types.ts'
 
-const SCHEMA_TITLE = '[meta] schema'
-const INDEX_TITLE  = '[meta] index'
-const LOG_TITLE    = '[meta] log'
+const SCHEMA_TITLE = '[hackwiki] schema'
+const INDEX_TITLE  = '[hackwiki] index'
+const LOG_TITLE    = '[hackwiki] log'
+const DEFAULT_SCHEMA = '# Schema\n\n_Fill this in._'
+
+type NoteSummary = {
+  id: string
+  title?: string
+}
+
+type WikiMeta = {
+  schemaId: string
+  indexId: string
+  logId: string
+}
 
 export interface WikiClient {
-  createTeamNote(teamPath: string, opts: Record<string, unknown>): Promise<{ id: string; content?: string }>
+  getNoteList(): Promise<NoteSummary[]>
+  createNote(opts: Record<string, unknown>): Promise<{ id: string; content?: string }>
   getNote(id: string): Promise<{ id: string; content?: string }>
-  updateTeamNote(teamPath: string, id: string, opts: Record<string, unknown>): Promise<unknown>
+  updateNote(id: string, opts: Record<string, unknown>): Promise<unknown>
 }
 
 export interface WikiConfig {
   token: string
-  teamPath: string
+  initialSchema?: string
   apiUrl?: string
 }
 
@@ -25,15 +38,12 @@ export interface CreatePageResult {
 }
 
 export interface Wiki {
-  bootstrap(initialSchema?: string): Promise<WikiMeta>
-  load(meta: WikiMeta): void
   startSession(): Promise<WikiSession>
   createPage(type: WikiNoteType, title: string, content: string, summary: string): Promise<CreatePageResult>
   updatePage(noteId: string, content: string): Promise<void>
   readPage(noteId: string): Promise<string>
   readPages(noteIds: string[]): Promise<Map<string, string>>
   searchIndex(query: string): Promise<WikiIndexEntry[]>
-  appendLog(operation: string, title: string): Promise<void>
   lint(): Promise<LintReport>
 }
 
@@ -42,36 +52,85 @@ export function createWiki(config: WikiConfig, client?: WikiClient): Wiki {
     config.token,
     config.apiUrl ?? 'https://api.hackmd.io/v1',
   ) as unknown as WikiClient)
+  const initialSchema = config.initialSchema ?? DEFAULT_SCHEMA
 
-  const teamPath = config.teamPath
   let meta: WikiMeta | null = null
+  let bootstrapping: Promise<WikiMeta> | null = null
 
-  function assertMeta(): WikiMeta {
-    if (!meta) throw new Error('Call bootstrap() or load() first.')
+  function findReservedNote(notes: NoteSummary[], title: string): NoteSummary | undefined {
+    const matches = notes.filter(note => note.title === title)
+    if (matches.length > 1) {
+      throw new Error(`Found multiple reserved notes titled "${title}".`)
+    }
+    return matches[0]
+  }
+
+  async function createReservedNote(title: string, content: string): Promise<{ id: string }> {
+    return api.createNote({
+      title,
+      content,
+      readPermission:  'owner',
+      writePermission: 'owner',
+    })
+  }
+
+  async function initializeMeta(): Promise<WikiMeta> {
+    const notes = await api.getNoteList()
+
+    const schema = findReservedNote(notes, SCHEMA_TITLE)
+    const index = findReservedNote(notes, INDEX_TITLE)
+    const log = findReservedNote(notes, LOG_TITLE)
+
+    const resolvedSchema = schema ?? await createReservedNote(SCHEMA_TITLE, initialSchema)
+    const resolvedIndex = index ?? await createReservedNote(INDEX_TITLE, serializeIndex([]))
+    const resolvedLog = log ?? await createReservedNote(LOG_TITLE, '# Log\n')
+
+    meta = {
+      schemaId: resolvedSchema.id,
+      indexId: resolvedIndex.id,
+      logId: resolvedLog.id,
+    }
+
     return meta
   }
 
+  async function bootstrap(): Promise<WikiMeta> {
+    if (meta) return meta
+
+    if (!bootstrapping) {
+      bootstrapping = initializeMeta().finally(() => {
+        bootstrapping = null
+      })
+    }
+
+    return bootstrapping
+  }
+
+  async function ensureMeta(): Promise<WikiMeta> {
+    return meta ?? bootstrap()
+  }
+
   async function getIndex(): Promise<WikiIndexEntry[]> {
-    const m = assertMeta()
+    const m = await ensureMeta()
     const note = await api.getNote(m.indexId)
     return parseIndex(note.content ?? '')
   }
 
   async function addToIndex(entry: WikiIndexEntry): Promise<WikiIndexEntry[]> {
-    const m = assertMeta()
+    const m = await ensureMeta()
     const entries = await getIndex()
     const existing = entries.findIndex(e => e.noteId === entry.noteId)
     if (existing >= 0) entries[existing] = entry
     else entries.push(entry)
-    await api.updateTeamNote(teamPath, m.indexId, { content: serializeIndex(entries) })
+    await api.updateNote(m.indexId, { content: serializeIndex(entries) })
     return entries
   }
 
   async function appendLog(operation: string, title: string): Promise<void> {
-    const m = assertMeta()
+    const m = await ensureMeta()
     const note = await api.getNote(m.logId)
     const updated = (note.content ?? '') + formatLogEntry(operation, title)
-    await api.updateTeamNote(teamPath, m.logId, { content: updated })
+    await api.updateNote(m.logId, { content: updated })
   }
 
   async function readPages(noteIds: string[]): Promise<Map<string, string>> {
@@ -82,37 +141,8 @@ export function createWiki(config: WikiConfig, client?: WikiClient): Wiki {
   }
 
   return {
-    async bootstrap(initialSchema = '# Schema\n\n_Fill this in._'): Promise<WikiMeta> {
-      const [schema, index, log] = await Promise.all([
-        api.createTeamNote(teamPath, {
-          title:           SCHEMA_TITLE,
-          content:         initialSchema,
-          readPermission:  'owner',
-          writePermission: 'owner',
-        }),
-        api.createTeamNote(teamPath, {
-          title:           INDEX_TITLE,
-          content:         serializeIndex([]),
-          readPermission:  'owner',
-          writePermission: 'owner',
-        }),
-        api.createTeamNote(teamPath, {
-          title:           LOG_TITLE,
-          content:         '# Log\n',
-          readPermission:  'owner',
-          writePermission: 'owner',
-        }),
-      ])
-      meta = { schemaId: schema.id, indexId: index.id, logId: log.id }
-      return meta
-    },
-
-    load(m: WikiMeta): void {
-      meta = m
-    },
-
     async startSession(): Promise<WikiSession> {
-      const m = assertMeta()
+      const m = await ensureMeta()
       const [schema, index, log] = await Promise.all([
         api.getNote(m.schemaId),
         api.getNote(m.indexId),
@@ -131,8 +161,8 @@ export function createWiki(config: WikiConfig, client?: WikiClient): Wiki {
       content: string,
       summary: string,
     ): Promise<CreatePageResult> {
-      assertMeta()
-      const note = await api.createTeamNote(teamPath, {
+      await ensureMeta()
+      const note = await api.createNote({
         title:           `[${type}] ${title}`,
         content,
         readPermission:  'owner',
@@ -146,8 +176,8 @@ export function createWiki(config: WikiConfig, client?: WikiClient): Wiki {
     },
 
     async updatePage(noteId: string, content: string): Promise<void> {
-      assertMeta()
-      await api.updateTeamNote(teamPath, noteId, { content })
+      await ensureMeta()
+      await api.updateNote(noteId, { content })
       await appendLog('update', noteId)
     },
 
@@ -166,8 +196,6 @@ export function createWiki(config: WikiConfig, client?: WikiClient): Wiki {
         e.summary.toLowerCase().includes(q),
       )
     },
-
-    appendLog,
 
     async lint(): Promise<LintReport> {
       const entries = await getIndex()

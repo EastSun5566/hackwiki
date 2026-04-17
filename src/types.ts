@@ -7,12 +7,6 @@ export interface WikiIndexEntry {
   summary: string
 }
 
-export interface WikiMeta {
-  schemaId: string
-  indexId: string
-  logId: string
-}
-
 export interface WikiSession {
   schema: string
   index: WikiIndexEntry[]

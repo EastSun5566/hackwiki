@@ -2,12 +2,18 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createWiki, type WikiClient } from '../src/index.ts'
 
+const RESERVED_TITLES = ['[hackwiki] schema', '[hackwiki] index', '[hackwiki] log']
+
 function createMockClient(): WikiClient {
   const store = new Map<string, { id: string; title?: string; content: string }>()
   let counter = 0
 
   return {
-    async createTeamNote(_teamPath, opts) {
+    async getNoteList() {
+      return [...store.values()].map(note => ({ id: note.id, title: note.title }))
+    },
+
+    async createNote(opts) {
       const id = `id-${++counter}`
       store.set(id, {
         id,
@@ -23,7 +29,7 @@ function createMockClient(): WikiClient {
       return note
     },
 
-    async updateTeamNote(_teamPath, id, opts) {
+    async updateNote(id, opts) {
       const note = store.get(id)
       if (!note) throw new Error(`Note not found: ${id}`)
       if (typeof opts.content === 'string') note.content = opts.content
@@ -34,39 +40,78 @@ function createMockClient(): WikiClient {
 
 async function makeWiki() {
   const mock = createMockClient()
-  const wiki = createWiki({ token: 'test-token', teamPath: 'test-team' }, mock)
-  const meta = await wiki.bootstrap()
-  wiki.load(meta)
-  return wiki
+  return createWiki({ token: 'test-token' }, mock)
 }
 
-describe('bootstrap', () => {
-  it('creates three distinct meta notes and returns WikiMeta', async () => {
+describe('initialization', () => {
+  it('auto-initializes the reserved notes on first use', async () => {
     const mock = createMockClient()
-    const wiki = createWiki({ token: 'tok', teamPath: 'team' }, mock)
-    const meta = await wiki.bootstrap()
+    const wiki = createWiki({ token: 'tok' }, mock)
+    const session = await wiki.startSession()
+    const notes = await mock.getNoteList()
 
-    assert.ok(meta.schemaId, 'schemaId should be truthy')
-    assert.ok(meta.indexId,  'indexId should be truthy')
-    assert.ok(meta.logId,    'logId should be truthy')
-    assert.notEqual(meta.schemaId, meta.indexId)
-    assert.notEqual(meta.indexId,  meta.logId)
-    assert.notEqual(meta.schemaId, meta.logId)
+    assert.equal(session.schema, '# Schema\n\n_Fill this in._')
+    assert.deepEqual(session.index, [])
+    assert.deepEqual(session.recentLog, [])
+    assert.equal(notes.length, 3)
+    assert.deepEqual(notes.map(note => note.title).sort(), [...RESERVED_TITLES].sort())
   })
 
-  it('accepts a custom initial schema', async () => {
+  it('reuses the same reserved notes across repeated operations', async () => {
     const mock = createMockClient()
-    const wiki = createWiki({ token: 'tok', teamPath: 'team' }, mock)
-    const meta = await wiki.bootstrap('# My Custom Schema')
-    wiki.load(meta)
+    const wiki = createWiki({ token: 'tok' }, mock)
+
+    await wiki.startSession()
+    const before = await mock.getNoteList()
+
+    await wiki.startSession()
+    const after = await mock.getNoteList()
+
+    assert.equal(before.length, 3)
+    assert.equal(after.length, 3)
+  })
+
+  it('discovers existing reserved notes in a new wiki instance', async () => {
+    const mock = createMockClient()
+    const first = createWiki({ token: 'tok' }, mock)
+    await first.startSession()
+    const before = await mock.getNoteList()
+
+    const second = createWiki({ token: 'tok' }, mock)
+    const session = await second.startSession()
+    const after = await mock.getNoteList()
+
+    assert.equal(before.length, 3)
+    assert.equal(after.length, 3)
+    assert.equal(session.schema, '# Schema\n\n_Fill this in._')
+  })
+
+  it('uses initialSchema on first creation', async () => {
+    const mock = createMockClient()
+    const wiki = createWiki({ token: 'tok', initialSchema: '# My Custom Schema' }, mock)
 
     const session = await wiki.startSession()
     assert.equal(session.schema, '# My Custom Schema')
   })
 
-  it('throws before bootstrap / load', () => {
-    const wiki = createWiki({ token: 'tok', teamPath: 'team' }, createMockClient())
-    assert.rejects(() => wiki.startSession(), /bootstrap/)
+  it('does not overwrite existing schema in later instances', async () => {
+    const mock = createMockClient()
+    const first = createWiki({ token: 'tok', initialSchema: '# First Schema' }, mock)
+    await first.startSession()
+
+    const second = createWiki({ token: 'tok', initialSchema: '# Second Schema' }, mock)
+    const session = await second.startSession()
+
+    assert.equal(session.schema, '# First Schema')
+  })
+
+  it('throws when duplicate reserved note titles exist', async () => {
+    const mock = createMockClient()
+    await mock.createNote({ title: '[hackwiki] schema', content: '# A' })
+    await mock.createNote({ title: '[hackwiki] schema', content: '# B' })
+
+    const wiki = createWiki({ token: 'tok' }, mock)
+    await assert.rejects(() => wiki.startSession(), /multiple reserved notes/i)
   })
 })
 
@@ -80,8 +125,7 @@ describe('startSession', () => {
 
   it('returns the schema content', async () => {
     const mock = createMockClient()
-    const wiki = createWiki({ token: 'tok', teamPath: 'team' }, mock)
-    wiki.load(await wiki.bootstrap('# Schema v1'))
+    const wiki = createWiki({ token: 'tok', initialSchema: '# Schema v1' }, mock)
     const { schema } = await wiki.startSession()
     assert.equal(schema, '# Schema v1')
   })
@@ -115,6 +159,15 @@ describe('createPage', () => {
     assert.equal(index[0].type,  'concept')
     assert.equal(index[0].summary, 'Retrieval-Augmented Generation')
   })
+
+  it('appends a create entry to recentLog', async () => {
+    const wiki = await makeWiki()
+    await wiki.createPage('concept', 'RAG', '# RAG', 'Retrieval-Augmented Generation')
+
+    const { recentLog } = await wiki.startSession()
+    assert.equal(recentLog.length, 1)
+    assert.match(recentLog[0], /create \| RAG$/)
+  })
 })
 
 describe('updatePage', () => {
@@ -127,6 +180,17 @@ describe('updatePage', () => {
     const content = await wiki.readPage(noteId)
     assert.ok(content.includes('v2 — updated content'), 'expected updated content')
     assert.ok(!content.includes('v1'), 'old content should be gone')
+  })
+
+  it('appends an update entry to recentLog', async () => {
+    const wiki = await makeWiki()
+    const { noteId } = await wiki.createPage('concept', 'RAG', '# RAG\n\nv1', 'RAG description')
+
+    await wiki.updatePage(noteId, '# RAG\n\nv2 — updated content')
+
+    const { recentLog } = await wiki.startSession()
+    assert.equal(recentLog.length, 2)
+    assert.match(recentLog[1], new RegExp(`update \\| ${noteId}$`))
   })
 })
 

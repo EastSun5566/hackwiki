@@ -1,7 +1,7 @@
 {
   "name": "hackwiki",
   "version": "0.0.1",
-  "description": "A library for maintaining a persistent, LLM-friendly wiki backed by HackMD team notes",
+  "description": "A library for maintaining a persistent, LLM-friendly wiki backed by HackMD notes",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
