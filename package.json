@@ -40,9 +40,6 @@
     "typescript"
   ],
   "license": "MIT",
-  "dependencies": {
-    "@hackmd/api": "^2.5.0"
-  },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "oxlint": "^1.60.0",

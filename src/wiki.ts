@@ -1,5 +1,4 @@
-import HackMDAPI from '@hackmd/api'
-
+import { HackMDClient, type WikiClient } from './client.ts'
 import { serializeIndex, parseIndex, formatLogEntry, parseRecentLog } from './parser.ts'
 import type { WikiNoteType, WikiIndexEntry, WikiSession, LintReport } from './types.ts'
 
@@ -17,13 +16,6 @@ type WikiMeta = {
   schemaId: string
   indexId: string
   logId: string
-}
-
-export interface WikiClient {
-  getNoteList(): Promise<NoteSummary[]>
-  createNote(opts: Record<string, unknown>): Promise<{ id: string; content?: string }>
-  getNote(id: string): Promise<{ id: string; content?: string }>
-  updateNote(id: string, opts: Record<string, unknown>): Promise<unknown>
 }
 
 export interface WikiConfig {
@@ -48,10 +40,10 @@ export interface Wiki {
 }
 
 export function createWiki(config: WikiConfig, client?: WikiClient): Wiki {
-  const api: WikiClient = client ?? (new HackMDAPI(
+  const api: WikiClient = client ?? new HackMDClient(
     config.token,
-    config.apiUrl ?? 'https://api.hackmd.io/v1',
-  ) as unknown as WikiClient)
+    config.apiUrl,
+  )
   const initialSchema = config.initialSchema ?? DEFAULT_SCHEMA
 
   let meta: WikiMeta | null = null
