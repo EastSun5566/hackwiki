@@ -5,6 +5,7 @@ import type { WikiNoteType, WikiIndexEntry, WikiSession, LintReport } from './ty
 const SCHEMA_TITLE = '[hackwiki] schema'
 const INDEX_TITLE  = '[hackwiki] index'
 const LOG_TITLE    = '[hackwiki] log'
+const HACKWIKI_TAG = 'hackwiki'
 const DEFAULT_SCHEMA = '# Schema\n\n_Fill this in._'
 
 type NoteSummary = {
@@ -61,6 +62,7 @@ export function createWiki(config: WikiConfig, client?: WikiClient): Wiki {
     return api.createNote({
       title,
       content,
+      tags: [HACKWIKI_TAG],
       readPermission:  'owner',
       writePermission: 'owner',
     })
@@ -157,6 +159,7 @@ export function createWiki(config: WikiConfig, client?: WikiClient): Wiki {
       const note = await api.createNote({
         title:           `[${type}] ${title}`,
         content,
+        tags:            [HACKWIKI_TAG],
         readPermission:  'owner',
         writePermission: 'owner',
       })

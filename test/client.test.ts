@@ -63,6 +63,7 @@ describe('HackMDClient', () => {
     const result = await client.createNote({
       title:           'Hello',
       content:         '# Hello',
+      tags:            ['hackwiki'],
       readPermission:  'owner',
       writePermission: 'owner',
     })
@@ -75,6 +76,7 @@ describe('HackMDClient', () => {
       JSON.stringify({
         title:           'Hello',
         content:         '# Hello',
+        tags:            ['hackwiki'],
         readPermission:  'owner',
         writePermission: 'owner',
       }),
