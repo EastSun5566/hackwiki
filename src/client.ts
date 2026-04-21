@@ -11,7 +11,7 @@ type Note = {
   content?: string
 }
 
-export interface WikiClient {
+export interface StoreClient {
   getNoteList(): Promise<NoteSummary[]>
   createNote(opts: Record<string, unknown>): Promise<Note>
   getNote(id: string): Promise<Note>
@@ -23,7 +23,7 @@ type RequestOptions = {
   body?: unknown
 }
 
-export class HackMDClient implements WikiClient {
+class HackMDClient implements StoreClient {
   private readonly token: string
   private readonly apiUrl: string
 
@@ -82,4 +82,8 @@ export class HackMDClient implements WikiClient {
       return text as T
     }
   }
+}
+
+export function createClient(token: string, apiUrl?: string): StoreClient {
+  return new HackMDClient(token, apiUrl)
 }

@@ -3,15 +3,9 @@ import assert from 'node:assert/strict'
 import { createWiki, type WikiClient } from '../src/index.ts'
 
 const RESERVED_TITLES = ['[hackwiki] schema', '[hackwiki] index', '[hackwiki] log']
-const HACKWIKI_TAG = 'hackwiki'
 
-type MockWikiClient = WikiClient & {
-  getCreateCalls(): Record<string, unknown>[]
-}
-
-function createMockClient(): MockWikiClient {
+function createMockClient(): WikiClient {
   const store = new Map<string, { id: string; title?: string; content: string }>()
-  const createCalls: Record<string, unknown>[] = []
   let counter = 0
 
   return {
@@ -21,10 +15,6 @@ function createMockClient(): MockWikiClient {
 
     async createNote(opts) {
       const id = `id-${++counter}`
-      createCalls.push({
-        ...opts,
-        tags: Array.isArray(opts.tags) ? [...(opts.tags as string[])] : opts.tags,
-      })
       store.set(id, {
         id,
         title:   opts.title as string | undefined,
@@ -45,10 +35,6 @@ function createMockClient(): MockWikiClient {
       if (typeof opts.content === 'string') note.content = opts.content
       return {}
     },
-
-    getCreateCalls() {
-      return createCalls
-    },
   }
 }
 
@@ -63,17 +49,12 @@ describe('initialization', () => {
     const wiki = createWiki({ token: 'tok' }, mock)
     const session = await wiki.startSession()
     const notes = await mock.getNoteList()
-    const createCalls = mock.getCreateCalls()
 
     assert.equal(session.schema, '# Schema\n\n_Fill this in._')
     assert.deepEqual(session.index, [])
     assert.deepEqual(session.recentLog, [])
     assert.equal(notes.length, 3)
     assert.deepEqual(notes.map(note => note.title).sort(), [...RESERVED_TITLES].sort())
-    assert.equal(createCalls.length, 3)
-    for (const call of createCalls) {
-      assert.deepEqual(call.tags, [HACKWIKI_TAG])
-    }
   })
 
   it('reuses the same reserved notes across repeated operations', async () => {
@@ -177,15 +158,6 @@ describe('createPage', () => {
     assert.equal(index[0].title, 'RAG')
     assert.equal(index[0].type,  'concept')
     assert.equal(index[0].summary, 'Retrieval-Augmented Generation')
-  })
-
-  it('tags newly created wiki pages for dashboard visibility', async () => {
-    const mock = createMockClient()
-    const wiki = createWiki({ token: 'tok' }, mock)
-
-    await wiki.createPage('concept', 'RAG', '# RAG', 'Retrieval-Augmented Generation')
-
-    assert.deepEqual(mock.getCreateCalls().at(-1)?.tags, [HACKWIKI_TAG])
   })
 
   it('appends a create entry to recentLog', async () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { HackMDClient } from '../src/client.ts'
+import { createClient } from '../src/client.ts'
 
 type FetchCall = {
   input: RequestInfo | URL
@@ -27,7 +27,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
-describe('HackMDClient', () => {
+describe('createClient', () => {
   it('lists notes with bearer auth against the default API URL', async () => {
     const calls = installFetchMock(() => new Response(
       JSON.stringify([{ id: 'note-1', title: 'Schema' }]),
@@ -37,7 +37,7 @@ describe('HackMDClient', () => {
       },
     ))
 
-    const client = new HackMDClient('secret-token')
+    const client = createClient('secret-token')
     const notes = await client.getNoteList()
 
     assert.deepEqual(notes, [{ id: 'note-1', title: 'Schema' }])
@@ -59,7 +59,7 @@ describe('HackMDClient', () => {
       },
     ))
 
-    const client = new HackMDClient('secret-token', 'https://example.com/v1/')
+    const client = createClient('secret-token', 'https://example.com/v1/')
     const result = await client.createNote({
       title:           'Hello',
       content:         '# Hello',
@@ -92,7 +92,7 @@ describe('HackMDClient', () => {
       },
     ))
 
-    const client = new HackMDClient('secret-token')
+    const client = createClient('secret-token')
     const note = await client.getNote('note/id with spaces')
 
     assert.equal(note.content, '# Note')
@@ -112,7 +112,7 @@ describe('HackMDClient', () => {
       },
     ))
 
-    const client = new HackMDClient('secret-token')
+    const client = createClient('secret-token')
     await client.updateNote('note-3', { content: '# Updated' })
 
     assert.equal(String(calls[0].input), 'https://api.hackmd.io/v1/notes/note-3')
@@ -130,7 +130,7 @@ describe('HackMDClient', () => {
       },
     ))
 
-    const client = new HackMDClient('bad-token')
+    const client = createClient('bad-token')
 
     await assert.rejects(
       () => client.getNoteList(),
@@ -140,7 +140,7 @@ describe('HackMDClient', () => {
 
   it('throws when the token is missing', () => {
     assert.throws(
-      () => new HackMDClient(''),
+      () => createClient(''),
       /missing access token/i,
     )
   })
