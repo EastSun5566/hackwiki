@@ -1,4 +1,7 @@
-export type { WikiNoteType, WikiIndexEntry, WikiSession, LintReport, Wiki } from './types.ts'
-export type { StoreClient } from './client.ts'
-export type { WikiConfig, CreatePageResult } from './wiki.ts'
-export { createWiki } from './wiki.ts'
+export type { WikiNoteType, WikiIndexEntry, WikiSession, LintReport } from './types.ts'
+export {
+  type WikiOptions,
+  type CreatePageResult,
+  Wiki,
+  createWiki,
+ } from './wiki.ts'

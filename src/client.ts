@@ -1,9 +1,6 @@
-const DEFAULT_API_URL = 'https://api.hackmd.io/v1'
+import type { NoteSummary } from "./types.ts"
 
-type NoteSummary = {
-  id: string
-  title?: string
-}
+const DEFAULT_API_URL = 'https://api.hackmd.io/v1'
 
 type Note = {
   id: string
@@ -11,19 +8,12 @@ type Note = {
   content?: string
 }
 
-export interface StoreClient {
-  getNoteList(): Promise<NoteSummary[]>
-  createNote(opts: Record<string, unknown>): Promise<Note>
-  getNote(id: string): Promise<Note>
-  updateNote(id: string, opts: Record<string, unknown>): Promise<unknown>
-}
-
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH'
   body?: unknown
 }
 
-class HackMDClient implements StoreClient {
+export class HackMDClient {
   private readonly token: string
   private readonly apiUrl: string
 
@@ -55,7 +45,7 @@ class HackMDClient implements StoreClient {
     return this.request(`/notes/${encodeURIComponent(id)}`, { method: 'PATCH', body: opts })
   }
 
-  private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method: options.method ?? 'GET',
       headers: {
@@ -66,12 +56,10 @@ class HackMDClient implements StoreClient {
     })
 
     const text = await response.text()
-
     if (!response.ok) {
       const detail = text ? `: ${text}` : ''
       throw new Error(`HackMD request failed (${response.status} ${response.statusText})${detail}`)
     }
-
     if (!text) {
       return undefined as T
     }
@@ -84,6 +72,6 @@ class HackMDClient implements StoreClient {
   }
 }
 
-export function createClient(token: string, apiUrl?: string): StoreClient {
+export function createClient(token: string, apiUrl?: string) {
   return new HackMDClient(token, apiUrl)
 }

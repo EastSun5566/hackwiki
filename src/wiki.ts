@@ -1,6 +1,6 @@
-import { createClient, type StoreClient } from './client.ts'
+import { createClient, type HackMDClient } from './client.ts'
 import { serializeIndex, parseIndex, formatLogEntry, parseRecentLog } from './parser.ts'
-import type { Wiki as WikiApi, WikiNoteType, WikiIndexEntry, WikiSession, LintReport } from './types.ts'
+import type { WikiNoteType, WikiIndexEntry, WikiSession, LintReport, NoteSummary } from './types.ts'
 
 const SCHEMA_TITLE = '[hackwiki] schema'
 const INDEX_TITLE  = '[hackwiki] index'
@@ -8,18 +8,13 @@ const LOG_TITLE    = '[hackwiki] log'
 const HACKWIKI_TAG = 'hackwiki'
 const DEFAULT_SCHEMA = '# Schema\n\n_Fill this in._'
 
-type NoteSummary = {
-  id: string
-  title?: string
-}
-
 type WikiMeta = {
   schemaId: string
   indexId: string
   logId: string
 }
 
-export interface WikiConfig {
+export interface WikiOptions {
   token: string
   initialSchema?: string
   apiUrl?: string
@@ -30,13 +25,13 @@ export interface CreatePageResult {
   indexSize: number
 }
 
-class Wiki implements WikiApi {
-  private readonly api: StoreClient
-  private readonly initialSchema: string
-  private meta: WikiMeta | null = null
-  private bootstrapping: Promise<WikiMeta> | null = null
+export class Wiki {
+  readonly api: HackMDClient
+  readonly initialSchema: string
+  meta: WikiMeta | null = null
+  bootstrapping: Promise<WikiMeta> | null = null
 
-  constructor(config: WikiConfig, client?: StoreClient) {
+  constructor(config: WikiOptions, client?: HackMDClient) {
     this.api = client ?? createClient(config.token, config.apiUrl)
     this.initialSchema = config.initialSchema ?? DEFAULT_SCHEMA
   }
@@ -127,7 +122,7 @@ class Wiki implements WikiApi {
     return { orphanPages, undocumentedMentions }
   }
 
-  private findReservedNote(notes: NoteSummary[], title: string): NoteSummary | undefined {
+  findReservedNote(notes: NoteSummary[], title: string): NoteSummary | undefined {
     const matches = notes.filter(note => note.title === title)
     if (matches.length > 1) {
       throw new Error(`Found multiple reserved notes titled "${title}".`)
@@ -135,7 +130,7 @@ class Wiki implements WikiApi {
     return matches[0]
   }
 
-  private async createReservedNote(title: string, content: string): Promise<string> {
+  async createReservedNote(title: string, content: string): Promise<string> {
     const note = await this.api.createNote({
       title,
       content,
@@ -146,7 +141,7 @@ class Wiki implements WikiApi {
     return note.id
   }
 
-  private async initializeMeta(): Promise<WikiMeta> {
+  async initializeMeta(): Promise<WikiMeta> {
     const notes = await this.api.getNoteList()
 
     const schema = this.findReservedNote(notes, SCHEMA_TITLE)
@@ -166,7 +161,7 @@ class Wiki implements WikiApi {
     return this.meta
   }
 
-  private async bootstrap(): Promise<WikiMeta> {
+  async bootstrap(): Promise<WikiMeta> {
     if (this.meta) return this.meta
 
     if (!this.bootstrapping) {
@@ -178,17 +173,17 @@ class Wiki implements WikiApi {
     return this.bootstrapping
   }
 
-  private async ensureMeta(): Promise<WikiMeta> {
+  async ensureMeta(): Promise<WikiMeta> {
     return this.meta ?? this.bootstrap()
   }
 
-  private async getIndex(): Promise<WikiIndexEntry[]> {
+  async getIndex(): Promise<WikiIndexEntry[]> {
     const { indexId } = await this.ensureMeta()
     const note = await this.api.getNote(indexId)
     return parseIndex(note.content ?? '')
   }
 
-  private async addToIndex(entry: WikiIndexEntry): Promise<WikiIndexEntry[]> {
+  async addToIndex(entry: WikiIndexEntry): Promise<WikiIndexEntry[]> {
     const { indexId } = await this.ensureMeta()
     const entries = await this.getIndex()
     const existing = entries.findIndex(e => e.noteId === entry.noteId)
@@ -198,7 +193,7 @@ class Wiki implements WikiApi {
     return entries
   }
 
-  private async appendLog(operation: string, title: string): Promise<void> {
+  async appendLog(operation: string, title: string): Promise<void> {
     const { logId } = await this.ensureMeta()
     const note = await this.api.getNote(logId)
     const updated = (note.content ?? '') + formatLogEntry(operation, title)
@@ -206,6 +201,6 @@ class Wiki implements WikiApi {
   }
 }
 
-export function createWiki(config: WikiConfig, client?: StoreClient): WikiApi {
+export function createWiki(config: WikiOptions, client?: HackMDClient) {
   return new Wiki(config, client)
 }
