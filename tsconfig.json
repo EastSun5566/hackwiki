@@ -1,17 +1,6 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "outDir": "dist",
-    "declaration": true,
-    "strict": true,
-    "verbatimModuleSyntax": true,
-    "erasableSyntaxOnly": true,
-    "rewriteRelativeImportExtensions": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "sourceMap": true
-  },
-  "include": ["src", "test"]
+  "files": [],
+  "include": [],
+  "exclude": [],
+  "references": [{ "path": "./packages/sdk" }, { "path": "./packages/cli" }]
 }

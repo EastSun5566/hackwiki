@@ -18,6 +18,14 @@ importers:
         specifier: ^1.60.0
         version: 1.60.0
 
+  packages/cli:
+    dependencies:
+      '@hackwiki/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+
+  packages/sdk: {}
+
 packages:
 
   '@oxlint/binding-android-arm-eabi@1.60.0':

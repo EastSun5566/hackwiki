@@ -87,7 +87,7 @@ describe('parseRecentLog', () => {
   it('respects custom n', () => {
     const recent = parseRecentLog(log, 3)
     assert.equal(recent.length, 3)
-    assert.ok(recent[0].includes('Article D'))  // last 3 of 6 → D, E, F
+    assert.ok(recent[0].includes('Article D'))
     assert.ok(recent[2].includes('Article F'))
   })
 

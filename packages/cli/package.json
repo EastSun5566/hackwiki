@@ -1,0 +1,47 @@
+{
+  "name": "@hackwiki/cli",
+  "version": "0.0.3",
+  "description": "CLI for managing a Hackwiki knowledge base from the terminal or an agent shell",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "hackwiki": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsgo --project tsconfig.build.json",
+    "cli": "node --env-file-if-exists=../../.env dist/cli.js",
+    "lint": "oxlint src test",
+    "lint:fix": "oxlint --fix src test",
+    "test": "node --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "@hackwiki/sdk": "workspace:*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EastSun5566/hackwiki.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EastSun5566/hackwiki/issues"
+  },
+  "homepage": "https://github.com/EastSun5566/hackwiki#readme",
+  "keywords": [
+    "hackmd",
+    "wiki",
+    "cli",
+    "agent",
+    "typescript"
+  ],
+  "license": "MIT"
+}

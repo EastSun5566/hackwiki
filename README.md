@@ -1,58 +1,97 @@
 # Hackwiki
 
-> A library for maintaining a persistent, LLM-friendly wiki backed by HackMD notes
+> A HackMD-backed knowledge-base toolkit for SDK, CLI, and agent workflows
 
-## Concept
+Hackwiki is now organized as a pnpm workspace:
 
-Three meta notes anchor the wiki:
+- `@hackwiki/sdk` — the TypeScript library
+- `@hackwiki/cli` — a thin CLI around the SDK
+- `skills/hackwiki` — agent skill
 
-- **schema** — describes the wiki's domain and vocabulary
-- **index** — lists all pages with type, title, and summary
-- **log** — append-only record of operations
+## Layout
 
-These reserved notes live under a managed HackMD folder layout:
+Hackwiki keeps all managed notes inside a dedicated HackMD folder tree:
 
 - `__HACKWIKI__/meta/[hackwiki] schema`
 - `__HACKWIKI__/meta/[hackwiki] index`
 - `__HACKWIKI__/meta/[hackwiki] log`
 
-Pages have four types: `raw`, `concept`, `entity`, `synthesis`.
+Regular wiki pages are created directly under `__HACKWIKI__/`.
 
-## Install
+Pages have four types: `raw`, `concept`, `entity`, and `synthesis`.
+
+## Packages
+
+### `@hackwiki/sdk`
+
+Install the SDK in another project:
 
 ```sh
-npm install hackwiki
+npm install @hackwiki/sdk
 ```
 
-## Usage
-
 ```ts
-import { createWiki } from "hackwiki";
+import { createWiki } from "@hackwiki/sdk";
 
 const wiki = createWiki({
   token: process.env.HACKMD_TOKEN,
 });
 
-// The first call auto-discovers or creates the reserved hackwiki notes
 const session = await wiki.startSession();
-// session.schema, session.index, session.recentLog
 
-// Create a page
-const { noteId, indexSize } = await wiki.createPage(
+const { noteId } = await wiki.createPage(
   "concept",
   "Retrieval-Augmented Generation",
   "# RAG\n\n...",
   "Pattern for grounding LLM output in retrieved documents",
 );
 
-// Update a page
 await wiki.updatePage(noteId, "# RAG\n\nUpdated content...");
-
-// Search the index
 const results = await wiki.searchIndex("retrieval");
-
-// Lint for orphans and undocumented [[wiki-links]]
 const { orphanPages, undocumentedMentions } = await wiki.lint();
 ```
 
-By default, hackwiki stores all managed notes inside a dedicated `__HACKWIKI__` folder in your HackMD personal space. Reserved metadata notes live in `__HACKWIKI__/meta/`, while regular wiki pages are created directly under `__HACKWIKI__/`.
+### `@hackwiki/cli`
+
+Run the CLI without a global install:
+
+```sh
+npx @hackwiki/cli --help
+```
+
+Common commands:
+
+```sh
+hackwiki session --json
+hackwiki search "retrieval" --json
+hackwiki page create concept "RAG" --summary "retrieval" --content "# RAG" --json
+hackwiki page update NOTE_ID --file ./note.md --json
+hackwiki page read NOTE_ID --json
+hackwiki lint --json
+```
+
+The CLI reads `HACKMD_TOKEN` from the environment.
+
+## Skills
+
+```sh
+npx skills add EastSun5566/hackwiki
+```
+
+Once installed, the skill instructs the agent to prefer the Hackwiki CLI with machine-readable `--json` output when appropriate.
+
+## Development
+
+Install dependencies once at the workspace root:
+
+```sh
+pnpm install
+```
+
+Run the workspace checks:
+
+```sh
+pnpm build
+pnpm test
+pnpm lint
+```
