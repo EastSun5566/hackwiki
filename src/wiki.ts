@@ -1,14 +1,25 @@
-import { createClient, type HackMDClient } from './client.ts'
+import { createClient, type WikiClient } from './client.ts'
 import { serializeIndex, parseIndex, formatLogEntry, parseRecentLog } from './parser.ts'
-import type { WikiNoteType, WikiIndexEntry, WikiSession, LintReport, NoteSummary } from './types.ts'
+import type {
+  WikiNoteType,
+  WikiIndexEntry,
+  WikiSession,
+  LintReport,
+  NoteSummary,
+  FolderSummary,
+} from './types.ts'
 
 const SCHEMA_TITLE = '[hackwiki] schema'
 const INDEX_TITLE  = '[hackwiki] index'
 const LOG_TITLE    = '[hackwiki] log'
+const ROOT_FOLDER_NAME = '__HACKWIKI__'
+const META_FOLDER_NAME = 'meta'
 const HACKWIKI_TAG = 'hackwiki'
 const DEFAULT_SCHEMA = '# Schema\n\n_Fill this in._'
 
 type WikiMeta = {
+  rootFolderId: string
+  metaFolderId: string
   schemaId: string
   indexId: string
   logId: string
@@ -26,12 +37,12 @@ export interface CreatePageResult {
 }
 
 export class Wiki {
-  readonly api: HackMDClient
+  readonly api: WikiClient
   readonly initialSchema: string
   meta: WikiMeta | null = null
   bootstrapping: Promise<WikiMeta> | null = null
 
-  constructor(config: WikiOptions, client?: HackMDClient) {
+  constructor(config: WikiOptions, client?: WikiClient) {
     this.api = client ?? createClient(config.token, config.apiUrl)
     this.initialSchema = config.initialSchema ?? DEFAULT_SCHEMA
   }
@@ -56,13 +67,14 @@ export class Wiki {
     content: string,
     summary: string,
   ): Promise<CreatePageResult> => {
-    await this.ensureMeta()
+    const { rootFolderId } = await this.ensureMeta()
     const note = await this.api.createNote({
       title:           `[${type}] ${title}`,
       content,
       tags:            [HACKWIKI_TAG],
       readPermission:  'owner',
       writePermission: 'owner',
+      parentFolderId:  rootFolderId,
     })
     const [entries] = await Promise.all([
       this.addToIndex({ noteId: note.id, type, title, summary }),
@@ -122,37 +134,105 @@ export class Wiki {
     return { orphanPages, undocumentedMentions }
   }
 
-  findReservedNote(notes: NoteSummary[], title: string): NoteSummary | undefined {
-    const matches = notes.filter(note => note.title === title)
+  findManagedFolder(
+    folders: FolderSummary[],
+    name: string,
+    parentFolderId: string | null,
+  ): FolderSummary | undefined {
+    const matches = folders.filter(folder =>
+      folder.name === name &&
+      (folder.parentFolderId ?? null) === parentFolderId,
+    )
     if (matches.length > 1) {
-      throw new Error(`Found multiple reserved notes titled "${title}".`)
+      const location = parentFolderId === null ? 'root' : `folder "${parentFolderId}"`
+      throw new Error(`Found multiple managed folders named "${name}" under ${location}.`)
     }
     return matches[0]
   }
 
-  async createReservedNote(title: string, content: string): Promise<string> {
+  async ensureRootFolder(folders: FolderSummary[]): Promise<FolderSummary> {
+    return this.findManagedFolder(folders, ROOT_FOLDER_NAME, null)
+      ?? this.api.createFolder({ name: ROOT_FOLDER_NAME })
+  }
+
+  async ensureMetaFolder(
+    folders: FolderSummary[],
+    rootFolderId: string,
+  ): Promise<FolderSummary> {
+    return this.findManagedFolder(folders, META_FOLDER_NAME, rootFolderId)
+      ?? this.api.createFolder({
+        name: META_FOLDER_NAME,
+        parentFolderId: rootFolderId,
+      })
+  }
+
+  noteParentFolderId(note: NoteSummary): string | undefined {
+    const paths = note.folderPaths ?? []
+    const parent = paths[paths.length - 1]
+    return typeof parent?.id === 'string' ? parent.id : undefined
+  }
+
+  findReservedNoteInFolder(
+    notes: NoteSummary[],
+    title: string,
+    folderId: string,
+  ): NoteSummary | undefined {
+    const matches = notes.filter(note =>
+      note.title === title &&
+      this.noteParentFolderId(note) === folderId,
+    )
+    if (matches.length > 1) {
+      throw new Error(`Found multiple reserved notes titled "${title}" in managed folder "${folderId}".`)
+    }
+    return matches[0]
+  }
+
+  async createReservedNoteInFolder(
+    title: string,
+    content: string,
+    parentFolderId: string,
+  ): Promise<string> {
     const note = await this.api.createNote({
       title,
       content,
       tags: [HACKWIKI_TAG],
       readPermission:  'owner',
       writePermission: 'owner',
+      parentFolderId,
     })
     return note.id
   }
 
   async initializeMeta(): Promise<WikiMeta> {
+    const folders = await this.api.getFolderList()
+    const rootFolder = await this.ensureRootFolder(folders)
+    const metaFolder = await this.ensureMetaFolder(folders, rootFolder.id)
+
     const notes = await this.api.getNoteList()
 
-    const schema = this.findReservedNote(notes, SCHEMA_TITLE)
-    const index = this.findReservedNote(notes, INDEX_TITLE)
-    const log = this.findReservedNote(notes, LOG_TITLE)
+    const schema = this.findReservedNoteInFolder(notes, SCHEMA_TITLE, metaFolder.id)
+    const index = this.findReservedNoteInFolder(notes, INDEX_TITLE, metaFolder.id)
+    const log = this.findReservedNoteInFolder(notes, LOG_TITLE, metaFolder.id)
 
-    const schemaId = schema?.id ?? await this.createReservedNote(SCHEMA_TITLE, this.initialSchema)
-    const indexId = index?.id ?? await this.createReservedNote(INDEX_TITLE, serializeIndex([]))
-    const logId = log?.id ?? await this.createReservedNote(LOG_TITLE, '# Log\n')
+    const schemaId = schema?.id ?? await this.createReservedNoteInFolder(
+      SCHEMA_TITLE,
+      this.initialSchema,
+      metaFolder.id,
+    )
+    const indexId = index?.id ?? await this.createReservedNoteInFolder(
+      INDEX_TITLE,
+      serializeIndex([]),
+      metaFolder.id,
+    )
+    const logId = log?.id ?? await this.createReservedNoteInFolder(
+      LOG_TITLE,
+      '# Log\n',
+      metaFolder.id,
+    )
 
     this.meta = {
+      rootFolderId: rootFolder.id,
+      metaFolderId: metaFolder.id,
       schemaId,
       indexId,
       logId,
@@ -201,6 +281,6 @@ export class Wiki {
   }
 }
 
-export function createWiki(config: WikiOptions, client?: HackMDClient) {
+export function createWiki(config: WikiOptions, client?: WikiClient) {
   return new Wiki(config, client)
 }

@@ -10,6 +10,12 @@ Three meta notes anchor the wiki:
 - **index** — lists all pages with type, title, and summary
 - **log** — append-only record of operations
 
+These reserved notes live under a managed HackMD folder layout:
+
+- `__HACKWIKI__/meta/[hackwiki] schema`
+- `__HACKWIKI__/meta/[hackwiki] index`
+- `__HACKWIKI__/meta/[hackwiki] log`
+
 Pages have four types: `raw`, `concept`, `entity`, `synthesis`.
 
 ## Install
@@ -49,4 +55,4 @@ const results = await wiki.searchIndex("retrieval");
 const { orphanPages, undocumentedMentions } = await wiki.lint();
 ```
 
-By default, hackwiki stores its reserved notes directly in your HackMD personal space.
+By default, hackwiki stores all managed notes inside a dedicated `__HACKWIKI__` folder in your HackMD personal space. Reserved metadata notes live in `__HACKWIKI__/meta/`, while regular wiki pages are created directly under `__HACKWIKI__/`.

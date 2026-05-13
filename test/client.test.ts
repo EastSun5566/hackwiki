@@ -50,6 +50,33 @@ describe('createClient', () => {
     assert.equal(headers.get('Content-Type'), 'application/json')
   })
 
+  it('lists folders with bearer auth against the default API URL', async () => {
+    const calls = installFetchMock(() => new Response(
+      JSON.stringify([{
+        id:             'folder-1',
+        name:           '__HACKWIKI__',
+        description:    null,
+        icon:           null,
+        color:          null,
+        parentFolderId: null,
+        createdAt:      1,
+        updatedAt:      1,
+      }]),
+      {
+        status:  200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ))
+
+    const client = createClient('secret-token')
+    const folders = await client.getFolderList()
+
+    assert.equal(folders.length, 1)
+    assert.equal(folders[0].name, '__HACKWIKI__')
+    assert.equal(String(calls[0].input), 'https://api.hackmd.io/v1/folders')
+    assert.equal(calls[0].init?.method, 'GET')
+  })
+
   it('creates notes with POST and a JSON body', async () => {
     const calls = installFetchMock(() => new Response(
       JSON.stringify({ id: 'note-2', content: '# Hello' }),
@@ -64,6 +91,7 @@ describe('createClient', () => {
       title:           'Hello',
       content:         '# Hello',
       tags:            ['hackwiki'],
+      parentFolderId:  'folder-1',
       readPermission:  'owner',
       writePermission: 'owner',
     })
@@ -77,8 +105,45 @@ describe('createClient', () => {
         title:           'Hello',
         content:         '# Hello',
         tags:            ['hackwiki'],
+        parentFolderId:  'folder-1',
         readPermission:  'owner',
         writePermission: 'owner',
+      }),
+    )
+  })
+
+  it('creates folders with POST and a JSON body', async () => {
+    const calls = installFetchMock(() => new Response(
+      JSON.stringify({
+        id:             'folder-2',
+        name:           'meta',
+        description:    null,
+        icon:           null,
+        color:          null,
+        parentFolderId: 'folder-1',
+        createdAt:      2,
+        updatedAt:      2,
+      }),
+      {
+        status:  200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ))
+
+    const client = createClient('secret-token')
+    const folder = await client.createFolder({
+      name: 'meta',
+      parentFolderId: 'folder-1',
+    })
+
+    assert.equal(folder.id, 'folder-2')
+    assert.equal(String(calls[0].input), 'https://api.hackmd.io/v1/folders')
+    assert.equal(calls[0].init?.method, 'POST')
+    assert.equal(
+      calls[0].init?.body,
+      JSON.stringify({
+        name: 'meta',
+        parentFolderId: 'folder-1',
       }),
     )
   })
@@ -113,11 +178,20 @@ describe('createClient', () => {
     ))
 
     const client = createClient('secret-token')
-    await client.updateNote('note-3', { content: '# Updated' })
+    await client.updateNote('note-3', {
+      content: '# Updated',
+      parentFolderId: 'folder-2',
+    })
 
     assert.equal(String(calls[0].input), 'https://api.hackmd.io/v1/notes/note-3')
     assert.equal(calls[0].init?.method, 'PATCH')
-    assert.equal(calls[0].init?.body, JSON.stringify({ content: '# Updated' }))
+    assert.equal(
+      calls[0].init?.body,
+      JSON.stringify({
+        content: '# Updated',
+        parentFolderId: 'folder-2',
+      }),
+    )
   })
 
   it('throws a useful error for non-ok responses', async () => {

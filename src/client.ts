@@ -1,19 +1,29 @@
-import type { NoteSummary } from "./types.ts"
+import type {
+  NoteSummary,
+  NoteDetails,
+  CreateNoteOptions,
+  UpdateNoteOptions,
+  FolderSummary,
+  CreateFolderOptions,
+} from './types.ts'
 
 const DEFAULT_API_URL = 'https://api.hackmd.io/v1'
-
-type Note = {
-  id: string
-  title?: string
-  content?: string
-}
 
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH'
   body?: unknown
 }
 
-export class HackMDClient {
+export interface WikiClient {
+  getNoteList(): Promise<NoteSummary[]>
+  createNote(opts: CreateNoteOptions): Promise<NoteDetails>
+  getNote(id: string): Promise<NoteDetails>
+  updateNote(id: string, opts: UpdateNoteOptions): Promise<unknown>
+  getFolderList(): Promise<FolderSummary[]>
+  createFolder(opts: CreateFolderOptions): Promise<FolderSummary>
+}
+
+export class HackMDClient implements WikiClient {
   private readonly token: string
   private readonly apiUrl: string
 
@@ -33,16 +43,24 @@ export class HackMDClient {
     return this.request<NoteSummary[]>('/notes')
   }
 
-  async createNote(opts: Record<string, unknown>): Promise<Note> {
-    return this.request<Note>('/notes', { method: 'POST', body: opts })
+  async createNote(opts: CreateNoteOptions): Promise<NoteDetails> {
+    return this.request<NoteDetails>('/notes', { method: 'POST', body: opts })
   }
 
-  async getNote(id: string): Promise<Note> {
-    return this.request<Note>(`/notes/${encodeURIComponent(id)}`)
+  async getNote(id: string): Promise<NoteDetails> {
+    return this.request<NoteDetails>(`/notes/${encodeURIComponent(id)}`)
   }
 
-  async updateNote(id: string, opts: Record<string, unknown>): Promise<unknown> {
+  async updateNote(id: string, opts: UpdateNoteOptions): Promise<unknown> {
     return this.request(`/notes/${encodeURIComponent(id)}`, { method: 'PATCH', body: opts })
+  }
+
+  async getFolderList(): Promise<FolderSummary[]> {
+    return this.request<FolderSummary[]>('/folders')
+  }
+
+  async createFolder(opts: CreateFolderOptions): Promise<FolderSummary> {
+    return this.request<FolderSummary>('/folders', { method: 'POST', body: opts })
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {

@@ -3,37 +3,116 @@ import assert from 'node:assert/strict'
 import { createWiki, type WikiClient } from '../src/index.ts'
 
 const RESERVED_TITLES = ['[hackwiki] schema', '[hackwiki] index', '[hackwiki] log']
+const ROOT_FOLDER_NAME = '__HACKWIKI__'
+const META_FOLDER_NAME = 'meta'
+
+type MockNote = {
+  id: string
+  title?: string
+  content: string
+  parentFolderId: string | null
+}
+
+type MockFolder = {
+  id: string
+  name: string
+  description: string | null
+  icon: string | null
+  color: string | null
+  parentFolderId: string | null
+  createdAt: number
+  updatedAt: number
+}
 
 function createMockClient(): WikiClient {
-  const store = new Map<string, { id: string; title?: string; content: string }>()
-  let counter = 0
+  const notes = new Map<string, MockNote>()
+  const folders = new Map<string, MockFolder>()
+  let noteCounter = 0
+  let folderCounter = 0
+  let timestamp = 0
+
+  const makeFolderPaths = (parentFolderId: string | null) => {
+    if (!parentFolderId) return []
+
+    const path = []
+    let currentId: string | null = parentFolderId
+    while (currentId) {
+      const folder = folders.get(currentId)
+      if (!folder) throw new Error(`Folder not found: ${currentId}`)
+      path.push({
+        id:       folder.id,
+        name:     folder.name,
+        parentId: folder.parentFolderId ?? undefined,
+        clientId: folder.id,
+      })
+      currentId = folder.parentFolderId
+    }
+    return path.reverse()
+  }
 
   return {
     async getNoteList() {
-      return [...store.values()].map(note => ({ id: note.id, title: note.title }))
+      return [...notes.values()].map(note => ({
+        id:          note.id,
+        title:       note.title,
+        folderPaths: makeFolderPaths(note.parentFolderId),
+      }))
     },
 
     async createNote(opts) {
-      const id = `id-${++counter}`
-      store.set(id, {
+      const id = `note-${++noteCounter}`
+      const parentFolderId = opts.parentFolderId ?? null
+      notes.set(id, {
         id,
         title:   opts.title as string | undefined,
         content: (opts.content as string) ?? '',
+        parentFolderId,
       })
-      return { id, content: (opts.content as string) ?? '' }
+      return {
+        id,
+        title:       opts.title as string | undefined,
+        content:     (opts.content as string) ?? '',
+        folderPaths: makeFolderPaths(parentFolderId),
+      }
     },
 
     async getNote(id) {
-      const note = store.get(id)
+      const note = notes.get(id)
       if (!note) throw new Error(`Note not found: ${id}`)
-      return note
+      return {
+        ...note,
+        folderPaths: makeFolderPaths(note.parentFolderId),
+      }
     },
 
     async updateNote(id, opts) {
-      const note = store.get(id)
+      const note = notes.get(id)
       if (!note) throw new Error(`Note not found: ${id}`)
       if (typeof opts.content === 'string') note.content = opts.content
+      if (typeof opts.title === 'string') note.title = opts.title
+      if (typeof opts.parentFolderId === 'string') note.parentFolderId = opts.parentFolderId
       return {}
+    },
+
+    async getFolderList() {
+      return [...folders.values()]
+    },
+
+    async createFolder(opts) {
+      const id = `folder-${++folderCounter}`
+      const createdAt = ++timestamp
+      const folder: MockFolder = {
+        id,
+        name:           opts.name,
+        description:    opts.description ?? null,
+        icon:           opts.icon ?? null,
+        color:          opts.color ?? null,
+        parentFolderId: opts.parentFolderId ?? null,
+        createdAt,
+        updatedAt:      createdAt,
+      }
+      folders.set(id, folder)
+      return folder
     },
   }
 }
@@ -43,18 +122,42 @@ async function makeWiki() {
   return createWiki({ token: 'test-token' }, mock)
 }
 
+function parentFolderIdOf(note: Awaited<ReturnType<WikiClient['getNoteList']>>[number]) {
+  return note.folderPaths?.[note.folderPaths.length - 1]?.id
+}
+
+function findFolder(
+  folders: Awaited<ReturnType<WikiClient['getFolderList']>>,
+  name: string,
+  parentFolderId: string | null,
+) {
+  return folders.find(folder =>
+    folder.name === name &&
+    (folder.parentFolderId ?? null) === parentFolderId,
+  )
+}
+
 describe('initialization', () => {
   it('auto-initializes the reserved notes on first use', async () => {
     const mock = createMockClient()
     const wiki = createWiki({ token: 'tok' }, mock)
     const session = await wiki.startSession()
     const notes = await mock.getNoteList()
+    const folders = await mock.getFolderList()
+    const rootFolder = findFolder(folders, ROOT_FOLDER_NAME, null)
+    const metaFolder = rootFolder
+      ? findFolder(folders, META_FOLDER_NAME, rootFolder.id)
+      : undefined
 
     assert.equal(session.schema, '# Schema\n\n_Fill this in._')
     assert.deepEqual(session.index, [])
     assert.deepEqual(session.recentLog, [])
+    assert.equal(folders.length, 2)
+    assert.ok(rootFolder, 'expected managed root folder to exist')
+    assert.ok(metaFolder, 'expected managed meta folder to exist')
     assert.equal(notes.length, 3)
     assert.deepEqual(notes.map(note => note.title).sort(), [...RESERVED_TITLES].sort())
+    assert.ok(notes.every(note => parentFolderIdOf(note) === metaFolder?.id))
   })
 
   it('reuses the same reserved notes across repeated operations', async () => {
@@ -63,12 +166,16 @@ describe('initialization', () => {
 
     await wiki.startSession()
     const before = await mock.getNoteList()
+    const beforeFolders = await mock.getFolderList()
 
     await wiki.startSession()
     const after = await mock.getNoteList()
+    const afterFolders = await mock.getFolderList()
 
     assert.equal(before.length, 3)
     assert.equal(after.length, 3)
+    assert.equal(beforeFolders.length, 2)
+    assert.equal(afterFolders.length, 2)
   })
 
   it('discovers existing reserved notes in a new wiki instance', async () => {
@@ -84,6 +191,30 @@ describe('initialization', () => {
     assert.equal(before.length, 3)
     assert.equal(after.length, 3)
     assert.equal(session.schema, '# Schema\n\n_Fill this in._')
+  })
+
+  it('ignores legacy root-level reserved notes and creates managed meta notes', async () => {
+    const mock = createMockClient()
+    await mock.createNote({ title: '[hackwiki] schema', content: '# Legacy Schema' })
+    await mock.createNote({ title: '[hackwiki] index', content: '# Legacy Index' })
+    await mock.createNote({ title: '[hackwiki] log', content: '# Legacy Log' })
+
+    const wiki = createWiki({ token: 'tok' }, mock)
+    const session = await wiki.startSession()
+    const notes = await mock.getNoteList()
+    const folders = await mock.getFolderList()
+    const rootFolder = findFolder(folders, ROOT_FOLDER_NAME, null)
+    const metaFolder = rootFolder
+      ? findFolder(folders, META_FOLDER_NAME, rootFolder.id)
+      : undefined
+
+    assert.equal(session.schema, '# Schema\n\n_Fill this in._')
+    assert.equal(notes.length, 6)
+    assert.ok(metaFolder, 'expected managed meta folder to exist')
+    assert.equal(
+      notes.filter(note => parentFolderIdOf(note) === metaFolder?.id).length,
+      3,
+    )
   })
 
   it('uses initialSchema on first creation', async () => {
@@ -107,11 +238,32 @@ describe('initialization', () => {
 
   it('throws when duplicate reserved note titles exist', async () => {
     const mock = createMockClient()
-    await mock.createNote({ title: '[hackwiki] schema', content: '# A' })
-    await mock.createNote({ title: '[hackwiki] schema', content: '# B' })
+    const root = await mock.createFolder({ name: ROOT_FOLDER_NAME })
+    const meta = await mock.createFolder({ name: META_FOLDER_NAME, parentFolderId: root.id })
+    await mock.createNote({ title: '[hackwiki] schema', content: '# A', parentFolderId: meta.id })
+    await mock.createNote({ title: '[hackwiki] schema', content: '# B', parentFolderId: meta.id })
 
     const wiki = createWiki({ token: 'tok' }, mock)
     await assert.rejects(() => wiki.startSession(), /multiple reserved notes/i)
+  })
+
+  it('throws when duplicate managed root folders exist', async () => {
+    const mock = createMockClient()
+    await mock.createFolder({ name: ROOT_FOLDER_NAME })
+    await mock.createFolder({ name: ROOT_FOLDER_NAME })
+
+    const wiki = createWiki({ token: 'tok' }, mock)
+    await assert.rejects(() => wiki.startSession(), /multiple managed folders/i)
+  })
+
+  it('throws when duplicate meta folders exist under the managed root', async () => {
+    const mock = createMockClient()
+    const root = await mock.createFolder({ name: ROOT_FOLDER_NAME })
+    await mock.createFolder({ name: META_FOLDER_NAME, parentFolderId: root.id })
+    await mock.createFolder({ name: META_FOLDER_NAME, parentFolderId: root.id })
+
+    const wiki = createWiki({ token: 'tok' }, mock)
+    await assert.rejects(() => wiki.startSession(), /multiple managed folders/i)
   })
 })
 
@@ -133,11 +285,17 @@ describe('startSession', () => {
 
 describe('createPage', () => {
   it('returns a noteId and indexSize of 1 for the first page', async () => {
-    const wiki = await makeWiki()
+    const mock = createMockClient()
+    const wiki = createWiki({ token: 'test-token' }, mock)
     const result = await wiki.createPage('concept', 'Self-Attention', '# Self-Attention\n\ncontent', 'Q/K/V mechanism')
+    const notes = await mock.getNoteList()
+    const folders = await mock.getFolderList()
+    const rootFolder = findFolder(folders, ROOT_FOLDER_NAME, null)
+    const page = notes.find(note => note.id === result.noteId)
 
     assert.ok(result.noteId)
     assert.equal(result.indexSize, 1)
+    assert.equal(parentFolderIdOf(page!), rootFolder?.id)
   })
 
   it('increments indexSize with each subsequent page', async () => {
