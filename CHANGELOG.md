@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.0.3](https://github.com/EastSun5566/hackwiki/compare/v0.0.2...v0.0.3) (2026-05-13)
+
+
+### Features
+
+* add tagging for meta notes and wiki pages ([062b352](https://github.com/EastSun5566/hackwiki/commit/062b3528909e39c5cd46f1cdbf29dceec2c00f21))
+* cleanup api ([4db5b60](https://github.com/EastSun5566/hackwiki/commit/4db5b60266bf579ad82fa6620e10b19983c174e5))
+* use folders to manage wiki ([70cd8c2](https://github.com/EastSun5566/hackwiki/commit/70cd8c221e5961abf8e855944f97957de6a5516e))
+* wrap our own hackmd client ([2f4a941](https://github.com/EastSun5566/hackwiki/commit/2f4a94149a637f3deee22ce1294e9d7fa90a0b6a))
+
 ### 0.0.2 (2026-04-17)
 
 
