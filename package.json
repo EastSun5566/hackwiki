@@ -18,8 +18,9 @@
   "packageManager": "pnpm@10.33.2",
   "scripts": {
     "build": "tsgo --project tsconfig.build.json",
-    "lint": "oxlint src test",
-    "lint:fix": "oxlint --fix src test",
+    "lint": "oxlint src test scripts",
+    "lint:fix": "oxlint --fix src test scripts",
+    "smoke": "node scripts/smoke-test.ts",
     "test": "node --test",
     "prepublishOnly": "pnpm run build",
     "release": "npx standard-version && git push --follow-tags && npm publish"
