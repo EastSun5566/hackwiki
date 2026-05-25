@@ -1,7 +1,6 @@
 {
   "name": "hackwiki",
   "private": true,
-  "version": "0.0.3",
   "description": "Hackwiki monorepo for the SDK, CLI, and agent skills",
   "packageManager": "pnpm@10.33.2",
   "scripts": {
