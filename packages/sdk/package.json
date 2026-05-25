@@ -1,6 +1,6 @@
 {
   "name": "@hackwiki/sdk",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "SDK for maintaining a persistent, LLM-friendly wiki backed by HackMD notes",
   "type": "module",
   "main": "dist/index.js",
