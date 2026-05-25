@@ -17,6 +17,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": false,
   "scripts": {
     "build": "tsgo --project tsconfig.build.json",
