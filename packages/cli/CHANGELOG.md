@@ -1,5 +1,16 @@
 # @hackwiki/cli
 
+## 0.2.0
+
+### Minor Changes
+
+- 937e8ed: Add agent maintainer workflow support with schema/index/log operations, structured index parsing, full-text search, page listing, and rule-based lint issues.
+
+### Patch Changes
+
+- Updated dependencies [937e8ed]
+  - @hackwiki/sdk@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
