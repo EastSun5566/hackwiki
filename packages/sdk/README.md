@@ -14,7 +14,7 @@ npm install @hackwiki/sdk
 import { createWiki } from "@hackwiki/sdk";
 
 const wiki = createWiki({
-  token: process.env.HACKMD_TOKEN,
+  token: process.env.HMD_API_ACCESS_TOKEN,
 });
 
 const session = await wiki.startSession();

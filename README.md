@@ -34,7 +34,7 @@ npm install @hackwiki/sdk
 import { createWiki } from "@hackwiki/sdk";
 
 const wiki = createWiki({
-  token: process.env.HACKMD_TOKEN,
+  token: process.env.HMD_API_ACCESS_TOKEN,
 });
 
 const session = await wiki.startSession();
@@ -80,7 +80,23 @@ hackwiki page read NOTE_ID --json
 hackwiki lint --json
 ```
 
-The CLI reads `HACKMD_TOKEN` from the environment.
+The CLI can reuse the official `hackmd-cli` login config:
+
+```sh
+hackmd-cli login
+npx @hackwiki/cli session --json
+```
+
+Token precedence:
+
+1. `HMD_API_ACCESS_TOKEN`
+2. `~/.hackmd/config.json` from `hackmd-cli login`
+
+API URL precedence:
+
+1. `--api-url`
+2. `HMD_API_ENDPOINT_URL`
+3. `~/.hackmd/config.json`
 
 `lint --json` includes both the legacy `orphanPages` / `undocumentedMentions`
 fields and a rule-based `issues` list with severity, message, and evidence.

@@ -40,6 +40,20 @@ pnpm --filter @hackwiki/cli run cli --help
 
 ## Environment
 
-- The CLI only reads values that are already present in `process.env`.
-- `HACKMD_TOKEN` — required
-- `HACKMD_API_URL` — optional override for the HackMD API base URL
+The CLI can reuse the official `hackmd-cli` login config:
+
+```sh
+hackmd-cli login
+npx @hackwiki/cli session --json
+```
+
+Token precedence:
+
+1. `HMD_API_ACCESS_TOKEN`
+2. `~/.hackmd/config.json` from `hackmd-cli login`
+
+API URL precedence:
+
+1. `--api-url`
+2. `HMD_API_ENDPOINT_URL`
+3. `~/.hackmd/config.json`

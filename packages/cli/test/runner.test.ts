@@ -15,6 +15,14 @@ type CapturedOutput = {
   stderr: string[]
 }
 
+type WikiConfigCall = {
+  token: string
+  apiUrl?: string
+}
+
+const TEST_HOME = '/home/test'
+const HACKMD_CONFIG_PATH = `${TEST_HOME}/.hackmd/config.json`
+
 function createOutput() {
   return {
     stdout: [],
@@ -77,16 +85,25 @@ function createWikiStub(overrides: Partial<CliWiki> = {}): CliWiki {
 function createDependencies(
   wiki: CliWiki,
   output: CapturedOutput,
-  env: Record<string, string | undefined> = { HACKMD_TOKEN: 'tok' },
+  env: Record<string, string | undefined> = { HMD_API_ACCESS_TOKEN: 'tok' },
+  files: Record<string, string> = {},
+  wikiConfigCalls: WikiConfigCall[] = [],
 ): CliDeps {
   return {
-    createWiki() {
+    createWiki(config) {
+      wikiConfigCalls.push(config)
       return wiki
     },
     env,
+    homeDir() {
+      return TEST_HOME
+    },
     async readFile(filePath) {
       if (filePath === '/tmp/page.md') return '# From file'
-      throw new Error(`unexpected file read: ${filePath}`)
+      if (filePath in files) return files[filePath]
+      const error = new Error(`ENOENT: no such file or directory, open '${filePath}'`) as NodeJS.ErrnoException
+      error.code = 'ENOENT'
+      throw error
     },
     stdout(text) {
       output.stdout.push(text)
@@ -121,6 +138,120 @@ describe('runCliWithDependencies', () => {
     assert.equal(json.schema, '# Schema')
     assert.equal(json.index.length, 1)
     assert.equal(json.recentLog.length, 1)
+  })
+
+  it('uses HMD_API_ACCESS_TOKEN before hackmd-cli config token', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['session', '--json'],
+      createDependencies(
+        createWikiStub(),
+        output,
+        { HMD_API_ACCESS_TOKEN: 'hackmd-cli-env-token' },
+        {
+          [HACKMD_CONFIG_PATH]: JSON.stringify({ accessToken: 'config-token' }),
+        },
+        wikiConfigCalls,
+      ),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.equal(wikiConfigCalls[0].token, 'hackmd-cli-env-token')
+  })
+
+  it('uses ~/.hackmd/config.json accessToken when token env is missing', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['session', '--json'],
+      createDependencies(
+        createWikiStub(),
+        output,
+        {},
+        {
+          [HACKMD_CONFIG_PATH]: JSON.stringify({ accessToken: 'config-token' }),
+        },
+        wikiConfigCalls,
+      ),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.equal(wikiConfigCalls[0].token, 'config-token')
+  })
+
+  it('prefers --api-url over all endpoint env and config values', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['session', '--api-url', 'https://cli.example/v1', '--json'],
+      createDependencies(
+        createWikiStub(),
+        output,
+        {
+          HMD_API_ACCESS_TOKEN: 'tok',
+          HMD_API_ENDPOINT_URL: 'https://hackmd-cli-env.example/v1',
+        },
+        {
+          [HACKMD_CONFIG_PATH]: JSON.stringify({ hackmdAPIEndpointURL: 'https://config.example/v1' }),
+        },
+        wikiConfigCalls,
+      ),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.equal(wikiConfigCalls[0].apiUrl, 'https://cli.example/v1')
+  })
+
+  it('uses HMD_API_ENDPOINT_URL before hackmd-cli config endpoint', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['session', '--json'],
+      createDependencies(
+        createWikiStub(),
+        output,
+        {
+          HMD_API_ACCESS_TOKEN: 'tok',
+          HMD_API_ENDPOINT_URL: 'https://hackmd-cli-env.example/v1',
+        },
+        {
+          [HACKMD_CONFIG_PATH]: JSON.stringify({ hackmdAPIEndpointURL: 'https://config.example/v1' }),
+        },
+        wikiConfigCalls,
+      ),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.equal(wikiConfigCalls[0].apiUrl, 'https://hackmd-cli-env.example/v1')
+  })
+
+  it('uses ~/.hackmd/config.json hackmdAPIEndpointURL when endpoint env is missing', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['session', '--json'],
+      createDependencies(
+        createWikiStub(),
+        output,
+        {},
+        {
+          [HACKMD_CONFIG_PATH]: JSON.stringify({
+            accessToken: 'config-token',
+            hackmdAPIEndpointURL: 'https://config.example/v1',
+          }),
+        },
+        wikiConfigCalls,
+      ),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.equal(wikiConfigCalls[0].apiUrl, 'https://config.example/v1')
   })
 
   it('creates a page from inline content', async () => {
@@ -304,7 +435,7 @@ describe('runCliWithDependencies', () => {
     assert.deepEqual(json, { success: true, noteId: 'note-99' })
   })
 
-  it('returns a usage error when HACKMD_TOKEN is missing', async () => {
+  it('returns a usage error when all token sources are missing', async () => {
     const output = createOutput()
     const exitCode = await runCliWithDeps(
       ['session'],
@@ -312,6 +443,24 @@ describe('runCliWithDependencies', () => {
     )
 
     assert.equal(exitCode, 1)
-    assert.match(output.stderr.join(''), /missing hackmd_token/i)
+    assert.match(output.stderr.join(''), /missing hackmd access token/i)
+    assert.match(output.stderr.join(''), /HMD_API_ACCESS_TOKEN/)
+    assert.match(output.stderr.join(''), /hackmd-cli login/)
+  })
+
+  it('returns a usage error when hackmd-cli config JSON is invalid', async () => {
+    const output = createOutput()
+    const exitCode = await runCliWithDeps(
+      ['session'],
+      createDependencies(
+        createWikiStub(),
+        output,
+        {},
+        { [HACKMD_CONFIG_PATH]: '{not json' },
+      ),
+    )
+
+    assert.equal(exitCode, 1)
+    assert.match(output.stderr.join(''), /invalid hackmd-cli config/i)
   })
 })

@@ -1,3 +1,5 @@
+import { AuthConfigError, resolveAuthConfig } from './auth.ts'
+
 export type CliWikiNoteType = 'raw' | 'concept' | 'entity' | 'synthesis'
 
 export interface CliWikiIndexEntry {
@@ -49,6 +51,7 @@ export interface CliWiki {
 export interface CliDeps {
   createWiki(config: { token: string; apiUrl?: string }): CliWiki
   env: Record<string, string | undefined>
+  homeDir(): string
   readFile(filePath: string): Promise<string>
   stdout(text: string): void
   stderr(text: string): void
@@ -73,8 +76,9 @@ Usage:
   hackwiki lint [--json] [--api-url <url>]
 
 Environment:
-  HACKMD_TOKEN         required token used to authenticate with HackMD
-  HACKMD_API_URL       optional override for the HackMD API base URL
+  HMD_API_ACCESS_TOKEN    hackmd-cli-compatible token
+  HMD_API_ENDPOINT_URL    hackmd-cli-compatible API URL
+  ~/.hackmd/config.json   hackmd-cli login config fallback
 `
 
 function isWikiNoteType(value: string): value is CliWikiNoteType {
@@ -161,14 +165,8 @@ async function loadContent(tokens: string[], deps: CliDeps): Promise<string> {
   throw new UserInputError('Missing content. Provide --content or --file.')
 }
 
-function createWikiFromEnv(deps: CliDeps, apiUrl?: string): CliWiki {
-  const token = deps.env.HACKMD_TOKEN?.trim()
-  if (!token) {
-    throw new UserInputError('Missing HACKMD_TOKEN. Set it in the environment before running the CLI.')
-  }
-
-  const resolvedApiUrl = apiUrl ?? (deps.env.HACKMD_API_URL?.trim() || undefined)
-  return deps.createWiki({ token, apiUrl: resolvedApiUrl })
+async function createWikiFromEnv(deps: CliDeps, apiUrl?: string): Promise<CliWiki> {
+  return deps.createWiki(await resolveAuthConfig(deps, apiUrl))
 }
 
 export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<number> {
@@ -180,7 +178,7 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
       return 0
     }
 
-    const wiki = createWikiFromEnv(deps, apiUrl)
+    const wiki = await createWikiFromEnv(deps, apiUrl)
     const [command, ...commandArgs] = rest
 
     if (command === 'session') {
@@ -432,7 +430,7 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
     throw new UserInputError(`Unknown command: ${command}.`)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (error instanceof UserInputError) {
+    if (error instanceof UserInputError || error instanceof AuthConfigError) {
       deps.stderr(`Error: ${message}\n`)
       deps.stderr('Run `hackwiki --help` for usage details.\n')
       return 1
