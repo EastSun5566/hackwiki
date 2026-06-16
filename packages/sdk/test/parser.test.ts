@@ -17,6 +17,45 @@ describe('parseIndex / serializeIndex', () => {
     assert.deepEqual(parsed, entries)
   })
 
+  it('serializes a machine-readable JSON block', () => {
+    const md = serializeIndex(entries)
+    assert.ok(md.includes('```hackwiki-index'))
+    assert.ok(md.includes('"noteId": "abc"'))
+  })
+
+  it('prefers the machine-readable JSON block over the readable list', () => {
+    const md = [
+      '# Index',
+      '',
+      '```hackwiki-index',
+      JSON.stringify([entries[0]], null, 2),
+      '```',
+      '',
+      '- [concept] Stale `old` — old summary',
+    ].join('\n')
+
+    assert.deepEqual(parseIndex(md), [entries[0]])
+  })
+
+  it('falls back to the legacy markdown format when JSON is missing', () => {
+    const md = '# Index\n\n- [concept] RAG `def` — Retrieval Augmented Generation'
+    assert.deepEqual(parseIndex(md), [entries[1]])
+  })
+
+  it('falls back to the legacy markdown format when JSON is invalid', () => {
+    const md = [
+      '# Index',
+      '',
+      '```hackwiki-index',
+      '{not json',
+      '```',
+      '',
+      '- [entity] OpenAI `ghi` — AI research company',
+    ].join('\n')
+
+    assert.deepEqual(parseIndex(md), [entries[2]])
+  })
+
   it('groups entries under correct section headings', () => {
     const md = serializeIndex(entries)
     assert.ok(md.includes('## Raw Sources'))

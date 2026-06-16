@@ -46,6 +46,9 @@ function createWikiStub(overrides: Partial<CliWiki> = {}): CliWiki {
     async readPage(): Promise<string> {
       return '# Page'
     },
+    async listPages() {
+      return []
+    },
     async searchIndex() {
       return []
     },
@@ -53,8 +56,20 @@ function createWikiStub(overrides: Partial<CliWiki> = {}): CliWiki {
       return {
         orphanPages: [],
         undocumentedMentions: [],
+        issues: [],
       }
     },
+    async readSchema() {
+      return '# Schema'
+    },
+    async updateSchema(): Promise<void> {},
+    async readIndex() {
+      return []
+    },
+    async readLog() {
+      return '# Log'
+    },
+    async appendLog(): Promise<void> {},
     ...overrides,
   }
 }
@@ -136,6 +151,137 @@ describe('runCliWithDependencies', () => {
     const json = JSON.parse(output.stdout.join(''))
     assert.equal(json.noteId, 'note-42')
     assert.equal(json.indexSize, 7)
+  })
+
+  it('reads schema data as JSON', async () => {
+    const output = createOutput()
+    const wiki = createWikiStub({
+      async readSchema() {
+        return '# Hackwiki Schema'
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['schema', 'read', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    const json = JSON.parse(output.stdout.join(''))
+    assert.equal(json.content, '# Hackwiki Schema')
+  })
+
+  it('updates schema data from a file path', async () => {
+    const output = createOutput()
+    const calls: string[] = []
+    const wiki = createWikiStub({
+      async updateSchema(content) {
+        calls.push(content)
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['schema', 'update', '--file', '/tmp/page.md', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(calls, ['# From file'])
+    assert.deepEqual(JSON.parse(output.stdout.join('')), { success: true })
+  })
+
+  it('reads index entries as JSON', async () => {
+    const output = createOutput()
+    const wiki = createWikiStub({
+      async readIndex() {
+        return [{ noteId: 'note-1', type: 'concept', title: 'RAG', summary: 'retrieval' }]
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['index', 'read', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    const json = JSON.parse(output.stdout.join(''))
+    assert.equal(json[0].title, 'RAG')
+  })
+
+  it('appends a log entry', async () => {
+    const output = createOutput()
+    const calls: Array<{ operation: string; title: string }> = []
+    const wiki = createWikiStub({
+      async appendLog(operation, title) {
+        calls.push({ operation, title })
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['log', 'append', 'ingest', 'Article A', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(calls, [{ operation: 'ingest', title: 'Article A' }])
+    assert.equal(JSON.parse(output.stdout.join('')).success, true)
+  })
+
+  it('reads log data as JSON', async () => {
+    const output = createOutput()
+    const wiki = createWikiStub({
+      async readLog() {
+        return '# Log\n\n## [2026-01-01] ingest | Article A'
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['log', 'read', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    const json = JSON.parse(output.stdout.join(''))
+    assert.match(json.content, /Article A/)
+  })
+
+  it('lists pages as JSON', async () => {
+    const output = createOutput()
+    const wiki = createWikiStub({
+      async listPages() {
+        return [{ noteId: 'note-2', type: 'entity', title: 'OpenAI', summary: 'company' }]
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'list', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    const json = JSON.parse(output.stdout.join(''))
+    assert.equal(json[0].noteId, 'note-2')
+  })
+
+  it('passes fullText through to search', async () => {
+    const output = createOutput()
+    const calls: Array<{ query: string; fullText?: boolean }> = []
+    const wiki = createWikiStub({
+      async searchIndex(query, options) {
+        calls.push({ query, fullText: options?.fullText })
+        return [{ noteId: 'note-3', type: 'concept', title: 'BERT', summary: 'encoder' }]
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['search', 'transformer', '--full-text', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(calls, [{ query: 'transformer', fullText: true }])
+    const json = JSON.parse(output.stdout.join(''))
+    assert.equal(json[0].title, 'BERT')
   })
 
   it('updates a page from a file path', async () => {

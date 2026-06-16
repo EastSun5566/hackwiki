@@ -68,6 +68,21 @@ export interface WikiIndexEntry {
   summary: string
 }
 
+export type LintRuleId =
+  | 'orphan-page'
+  | 'missing-wikilink-target'
+  | 'broken-note-link'
+  | 'duplicate-index-title'
+
+export type LintSeverity = 'info' | 'warning' | 'error'
+
+export interface LintIssue {
+  ruleId: LintRuleId
+  severity: LintSeverity
+  message: string
+  evidence: Record<string, string>
+}
+
 export interface WikiSession {
   schema: string
   index: WikiIndexEntry[]
@@ -77,4 +92,5 @@ export interface WikiSession {
 export interface LintReport {
   orphanPages: WikiIndexEntry[]
   undocumentedMentions: string[]
+  issues: LintIssue[]
 }

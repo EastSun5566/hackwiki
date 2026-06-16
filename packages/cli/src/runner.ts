@@ -13,9 +13,17 @@ export interface CliWikiSession {
   recentLog: string[]
 }
 
+export interface CliLintIssue {
+  ruleId: 'orphan-page' | 'missing-wikilink-target' | 'broken-note-link' | 'duplicate-index-title'
+  severity: 'info' | 'warning' | 'error'
+  message: string
+  evidence: Record<string, string>
+}
+
 export interface CliLintReport {
   orphanPages: CliWikiIndexEntry[]
   undocumentedMentions: string[]
+  issues: CliLintIssue[]
 }
 
 export interface CliCreatePageResult {
@@ -28,8 +36,14 @@ export interface CliWiki {
   createPage(type: CliWikiNoteType, title: string, content: string, summary: string): Promise<CliCreatePageResult>
   updatePage(noteId: string, content: string): Promise<void>
   readPage(noteId: string): Promise<string>
-  searchIndex(query: string): Promise<CliWikiIndexEntry[]>
+  listPages(): Promise<CliWikiIndexEntry[]>
+  searchIndex(query: string, options?: { fullText?: boolean }): Promise<CliWikiIndexEntry[]>
   lint(): Promise<CliLintReport>
+  readSchema(): Promise<string>
+  updateSchema(content: string): Promise<void>
+  readIndex(): Promise<CliWikiIndexEntry[]>
+  readLog(): Promise<string>
+  appendLog(operation: string, title: string): Promise<void>
 }
 
 export interface CliDeps {
@@ -46,10 +60,16 @@ const HELP_TEXT = `hackwiki CLI
 
 Usage:
   hackwiki session [--json] [--api-url <url>]
+  hackwiki schema read [--json] [--api-url <url>]
+  hackwiki schema update (--content <content> | --file <path>) [--json] [--api-url <url>]
+  hackwiki index read [--json] [--api-url <url>]
+  hackwiki log read [--json] [--api-url <url>]
+  hackwiki log append <operation> <title> [--json] [--api-url <url>]
+  hackwiki page list [--json] [--api-url <url>]
   hackwiki page create <type> <title> --summary <summary> (--content <content> | --file <path>) [--json] [--api-url <url>]
   hackwiki page update <noteId> (--content <content> | --file <path>) [--json] [--api-url <url>]
   hackwiki page read <noteId> [--json] [--api-url <url>]
-  hackwiki search <query> [--json] [--api-url <url>]
+  hackwiki search <query> [--full-text] [--json] [--api-url <url>]
   hackwiki lint [--json] [--api-url <url>]
 
 Environment:
@@ -72,6 +92,14 @@ function extractOption(tokens: string[], name: string): string | undefined {
 
   tokens.splice(index, 2)
   return value
+}
+
+function extractFlag(tokens: string[], name: string): boolean {
+  const index = tokens.indexOf(name)
+  if (index < 0) return false
+
+  tokens.splice(index, 1)
+  return true
 }
 
 function parseGlobalOptions(args: string[]) {
@@ -118,7 +146,7 @@ async function loadContent(tokens: string[], deps: CliDeps): Promise<string> {
   const inlineContent = extractOption(tokens, '--content')
   const filePath = extractOption(tokens, '--file')
 
-  if (inlineContent && filePath) {
+  if (inlineContent !== undefined && filePath !== undefined) {
     throw new UserInputError('Use either --content or --file, not both.')
   }
 
@@ -181,12 +209,14 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
     }
 
     if (command === 'search') {
-      if (commandArgs.length === 0) {
+      const tokens = [...commandArgs]
+      const fullText = extractFlag(tokens, '--full-text')
+      if (tokens.length === 0) {
         throw new UserInputError('The search command requires a query.')
       }
 
-      const query = commandArgs.join(' ')
-      const results = await wiki.searchIndex(query)
+      const query = tokens.join(' ')
+      const results = await wiki.searchIndex(query, { fullText })
       if (json) {
         writeJson(deps, results)
       } else if (results.length === 0) {
@@ -195,6 +225,91 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
         writeText(deps, results.map(renderIndexEntry).join('\n'))
       }
       return 0
+    }
+
+    if (command === 'schema') {
+      const [subcommand, ...schemaArgs] = commandArgs
+      if (subcommand === 'read') {
+        if (schemaArgs.length > 0) {
+          throw new UserInputError('Usage: hackwiki schema read')
+        }
+        const content = await wiki.readSchema()
+        if (json) {
+          writeJson(deps, { content })
+        } else {
+          writeText(deps, content)
+        }
+        return 0
+      }
+
+      if (subcommand === 'update') {
+        const tokens = [...schemaArgs]
+        const content = await loadContent(tokens, deps)
+        if (tokens.length > 0) {
+          throw new UserInputError(`Unexpected arguments for schema update: ${tokens.join(' ')}`)
+        }
+
+        await wiki.updateSchema(content)
+        if (json) {
+          writeJson(deps, { success: true })
+        } else {
+          writeText(deps, 'Updated schema.')
+        }
+        return 0
+      }
+
+      throw new UserInputError('The schema command requires a subcommand (read or update).')
+    }
+
+    if (command === 'index') {
+      const [subcommand, ...indexArgs] = commandArgs
+      if (subcommand !== 'read' || indexArgs.length > 0) {
+        throw new UserInputError('Usage: hackwiki index read')
+      }
+
+      const entries = await wiki.readIndex()
+      if (json) {
+        writeJson(deps, entries)
+      } else if (entries.length === 0) {
+        writeText(deps, 'Index is empty.')
+      } else {
+        writeText(deps, entries.map(renderIndexEntry).join('\n'))
+      }
+      return 0
+    }
+
+    if (command === 'log') {
+      const [subcommand, ...logArgs] = commandArgs
+      if (subcommand === 'read') {
+        if (logArgs.length > 0) {
+          throw new UserInputError('Usage: hackwiki log read')
+        }
+        const content = await wiki.readLog()
+        if (json) {
+          writeJson(deps, { content })
+        } else {
+          writeText(deps, content)
+        }
+        return 0
+      }
+
+      if (subcommand === 'append') {
+        const [operation, ...titleParts] = logArgs
+        if (!operation || titleParts.length === 0) {
+          throw new UserInputError('Usage: hackwiki log append <operation> <title>')
+        }
+
+        const title = titleParts.join(' ')
+        await wiki.appendLog(operation, title)
+        if (json) {
+          writeJson(deps, { success: true, operation, title })
+        } else {
+          writeText(deps, `Appended log entry: ${operation} | ${title}`)
+        }
+        return 0
+      }
+
+      throw new UserInputError('The log command requires a subcommand (read or append).')
     }
 
     if (command === 'lint') {
@@ -206,22 +321,16 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
       if (json) {
         writeJson(deps, report)
       } else {
-        const orphanLines = report.orphanPages.length > 0
-          ? report.orphanPages.map(renderIndexEntry)
-          : ['(none)']
-        const mentionLines = report.undocumentedMentions.length > 0
-          ? report.undocumentedMentions.map(item => `- ${item}`)
+        const issueLines = report.issues.length > 0
+          ? report.issues.map(issue => `- [${issue.severity}] ${issue.ruleId}: ${issue.message}`)
           : ['(none)']
         writeText(
           deps,
           [
             '# Lint Report',
             '',
-            '## Orphan Pages',
-            ...orphanLines,
-            '',
-            '## Undocumented Mentions',
-            ...mentionLines,
+            '## Issues',
+            ...issueLines,
           ].join('\n'),
         )
       }
@@ -231,7 +340,22 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
     if (command === 'page') {
       const [subcommand, ...pageArgs] = commandArgs
       if (!subcommand) {
-        throw new UserInputError('The page command requires a subcommand (create, update, or read).')
+        throw new UserInputError('The page command requires a subcommand (list, create, update, or read).')
+      }
+
+      if (subcommand === 'list') {
+        if (pageArgs.length > 0) {
+          throw new UserInputError('Usage: hackwiki page list')
+        }
+        const entries = await wiki.listPages()
+        if (json) {
+          writeJson(deps, entries)
+        } else if (entries.length === 0) {
+          writeText(deps, 'No pages found.')
+        } else {
+          writeText(deps, entries.map(renderIndexEntry).join('\n'))
+        }
+        return 0
       }
 
       if (subcommand === 'create') {

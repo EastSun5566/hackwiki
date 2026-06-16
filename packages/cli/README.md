@@ -18,7 +18,14 @@ npx @hackwiki/cli --help
 
 ```sh
 hackwiki session --json
+hackwiki schema read --json
+hackwiki schema update --file ./schema.md --json
+hackwiki index read --json
+hackwiki log read --json
+hackwiki log append ingest "RAG Article" --json
+hackwiki page list --json
 hackwiki search "retrieval"
+hackwiki search "grounding" --full-text --json
 hackwiki page create concept "RAG" --summary "retrieval" --content "# RAG"
 hackwiki page update NOTE_ID --file ./note.md
 hackwiki page read NOTE_ID

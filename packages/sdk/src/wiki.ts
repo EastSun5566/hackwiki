@@ -5,6 +5,7 @@ import type {
   WikiIndexEntry,
   WikiSession,
   LintReport,
+  LintIssue,
   NoteSummary,
   FolderSummary,
 } from './types.ts'
@@ -15,7 +16,54 @@ const LOG_TITLE    = '[hackwiki] log'
 const ROOT_FOLDER_NAME = '__HACKWIKI__'
 const META_FOLDER_NAME = 'meta'
 const HACKWIKI_TAG = 'hackwiki'
-const DEFAULT_SCHEMA = '# Schema\n\n_Fill this in._'
+const DEFAULT_SCHEMA = `# Hackwiki Schema
+
+## Purpose
+
+Hackwiki is a persistent, HackMD-backed wiki maintained by agents. Raw sources are the source of truth; wiki pages are maintained summaries, entities, concepts, and synthesis notes.
+
+## Page Types
+
+- raw: immutable or lightly cleaned source material. Do not rewrite the source meaning.
+- concept: reusable ideas, patterns, mechanisms, or topics.
+- entity: people, organizations, projects, products, places, or named objects.
+- synthesis: cross-page analysis, comparisons, timelines, decisions, or answers worth keeping.
+
+## Page Format
+
+Each managed page should use:
+
+1. A single H1 title.
+2. A short summary near the top.
+3. Sections with stable headings.
+4. Wiki links as [[Page Title]] when referring to another indexed page.
+5. Markdown links with note IDs when linking directly to HackMD notes.
+
+## Ingest Workflow
+
+1. Run \`hackwiki session --json\` and read the schema, index, and recent log.
+2. Read the source and identify the raw, concept, entity, and synthesis pages it affects.
+3. Create a raw page for the source when the source is new.
+4. Update existing concept/entity/synthesis pages instead of creating duplicates.
+5. Add new pages to the index with concise summaries.
+6. Append a log entry describing the ingest.
+7. Run \`hackwiki lint --json\` and fix actionable issues.
+
+## Query Workflow
+
+1. Start with \`hackwiki session --json\`.
+2. Search the index first, then read relevant pages.
+3. Answer with citations to page titles or note IDs.
+4. If the answer is durable knowledge, file it as a synthesis page and update the index/log.
+
+## Lint Workflow
+
+Treat lint output as maintenance hints. Fix missing wiki-link targets, broken note links, duplicate index titles, and orphan concept/entity/synthesis pages when the fix is clear.
+`
+
+export interface SearchOptions {
+  fullText?: boolean
+}
 
 type WikiMeta = {
   rootFolderId: string
@@ -104,18 +152,37 @@ export class Wiki {
     return new Map(results)
   }
 
-  searchIndex = async (query: string): Promise<WikiIndexEntry[]> => {
+  listPages = async (): Promise<WikiIndexEntry[]> => this.getIndex()
+
+  searchIndex = async (
+    query: string,
+    options: SearchOptions = {},
+  ): Promise<WikiIndexEntry[]> => {
     const q = query.toLowerCase()
     const entries = await this.getIndex()
-    return entries.filter(e =>
+    const indexMatches = entries.filter(e =>
       e.title.toLowerCase().includes(q) ||
       e.summary.toLowerCase().includes(q),
     )
+
+    if (!options.fullText) {
+      return indexMatches
+    }
+
+    const matchedIds = new Set(indexMatches.map(e => e.noteId))
+    const contentById = await this.readPages(entries.map(e => e.noteId))
+    const contentMatches = entries.filter(e => {
+      if (matchedIds.has(e.noteId)) return false
+      return (contentById.get(e.noteId) ?? '').toLowerCase().includes(q)
+    })
+
+    return [...indexMatches, ...contentMatches]
   }
 
   lint = async (): Promise<LintReport> => {
     const entries = await this.getIndex()
     const allContent = await this.readPages(entries.map(e => e.noteId))
+    const issues: LintIssue[] = []
 
     const orphanPages = entries.filter(e => {
       if (e.type === 'raw') return false
@@ -125,13 +192,72 @@ export class Wiki {
         .join('\n')
       return !otherContent.includes(e.noteId) && !otherContent.includes(e.title)
     })
+    for (const page of orphanPages) {
+      issues.push({
+        ruleId:   'orphan-page',
+        severity: 'warning',
+        message:  `Page "${page.title}" has no inbound references from other indexed pages.`,
+        evidence: {
+          noteId: page.noteId,
+          title:  page.title,
+          type:   page.type,
+        },
+      })
+    }
 
     const merged = [...allContent.values()].join('\n')
-    const mentioned = [...merged.matchAll(/\[\[([^\]]+)\]\]/g)].map(match => match[1])
+    const mentioned = [...merged.matchAll(/\[\[([^\]]+)\]\]/g)].map(match => {
+      const rawTarget = match[1].trim()
+      return rawTarget.split('|')[0].split('#')[0].trim()
+    })
     const indexed = new Set(entries.map(e => e.title))
     const undocumentedMentions = [...new Set(mentioned.filter(t => !indexed.has(t)))]
+    for (const title of undocumentedMentions) {
+      issues.push({
+        ruleId:   'missing-wikilink-target',
+        severity: 'warning',
+        message:  `Wiki link target "${title}" is not present in the index.`,
+        evidence: { title },
+      })
+    }
 
-    return { orphanPages, undocumentedMentions }
+    const noteIds = new Set(entries.map(e => e.noteId))
+    const markdownLinks = [...merged.matchAll(/\[[^\]]+\]\(([^)\s]+)\)/g)]
+      .map(match => match[1].trim())
+    const brokenNoteLinks = [...new Set(markdownLinks.filter(href =>
+      !href.startsWith('#') &&
+      !href.includes('://') &&
+      !href.startsWith('mailto:') &&
+      !noteIds.has(href),
+    ))]
+    for (const href of brokenNoteLinks) {
+      issues.push({
+        ruleId:   'broken-note-link',
+        severity: 'warning',
+        message:  `Markdown note link "${href}" does not match an indexed note ID.`,
+        evidence: { href },
+      })
+    }
+
+    const titles = new Map<string, WikiIndexEntry[]>()
+    for (const entry of entries) {
+      const key = entry.title.trim().toLowerCase()
+      titles.set(key, [...(titles.get(key) ?? []), entry])
+    }
+    for (const duplicates of titles.values()) {
+      if (duplicates.length < 2) continue
+      issues.push({
+        ruleId:   'duplicate-index-title',
+        severity: 'error',
+        message:  `Index title "${duplicates[0].title}" appears ${duplicates.length} times.`,
+        evidence: {
+          title:   duplicates[0].title,
+          noteIds: duplicates.map(entry => entry.noteId).join(', '),
+        },
+      })
+    }
+
+    return { orphanPages, undocumentedMentions, issues }
   }
 
   findManagedFolder(
@@ -261,6 +387,32 @@ export class Wiki {
     const { indexId } = await this.ensureMeta()
     const note = await this.api.getNote(indexId)
     return parseIndex(note.content ?? '')
+  }
+
+  async readSchema(): Promise<string> {
+    const { schemaId } = await this.ensureMeta()
+    const note = await this.api.getNote(schemaId)
+    return note.content ?? ''
+  }
+
+  async updateSchema(content: string): Promise<void> {
+    const { schemaId } = await this.ensureMeta()
+    await this.api.updateNote(schemaId, { content })
+  }
+
+  async readIndex(): Promise<WikiIndexEntry[]> {
+    return this.getIndex()
+  }
+
+  async updateIndex(entries: WikiIndexEntry[]): Promise<void> {
+    const { indexId } = await this.ensureMeta()
+    await this.api.updateNote(indexId, { content: serializeIndex(entries) })
+  }
+
+  async readLog(): Promise<string> {
+    const { logId } = await this.ensureMeta()
+    const note = await this.api.getNote(logId)
+    return note.content ?? ''
   }
 
   async addToIndex(entry: WikiIndexEntry): Promise<WikiIndexEntry[]> {

@@ -149,7 +149,8 @@ describe('initialization', () => {
       ? findFolder(folders, META_FOLDER_NAME, rootFolder.id)
       : undefined
 
-    assert.equal(session.schema, '# Schema\n\n_Fill this in._')
+    assert.match(session.schema, /# Hackwiki Schema/)
+    assert.match(session.schema, /Ingest Workflow/)
     assert.deepEqual(session.index, [])
     assert.deepEqual(session.recentLog, [])
     assert.equal(folders.length, 2)
@@ -190,7 +191,7 @@ describe('initialization', () => {
 
     assert.equal(before.length, 3)
     assert.equal(after.length, 3)
-    assert.equal(session.schema, '# Schema\n\n_Fill this in._')
+    assert.match(session.schema, /# Hackwiki Schema/)
   })
 
   it('ignores legacy root-level reserved notes and creates managed meta notes', async () => {
@@ -208,7 +209,7 @@ describe('initialization', () => {
       ? findFolder(folders, META_FOLDER_NAME, rootFolder.id)
       : undefined
 
-    assert.equal(session.schema, '# Schema\n\n_Fill this in._')
+    assert.match(session.schema, /# Hackwiki Schema/)
     assert.equal(notes.length, 6)
     assert.ok(metaFolder, 'expected managed meta folder to exist')
     assert.equal(
@@ -280,6 +281,42 @@ describe('startSession', () => {
     const wiki = createWiki({ token: 'tok', initialSchema: '# Schema v1' }, mock)
     const { schema } = await wiki.startSession()
     assert.equal(schema, '# Schema v1')
+  })
+})
+
+describe('meta operations', () => {
+  it('reads and updates the schema note', async () => {
+    const wiki = await makeWiki()
+
+    assert.match(await wiki.readSchema(), /# Hackwiki Schema/)
+    await wiki.updateSchema('# Custom Schema')
+
+    assert.equal(await wiki.readSchema(), '# Custom Schema')
+  })
+
+  it('reads and updates the index entries', async () => {
+    const wiki = await makeWiki()
+    const entries = [{
+      noteId:  'note-abc',
+      type:    'concept' as const,
+      title:   'RAG',
+      summary: 'retrieval',
+    }]
+
+    await wiki.updateIndex(entries)
+
+    assert.deepEqual(await wiki.readIndex(), entries)
+    assert.deepEqual(await wiki.listPages(), entries)
+  })
+
+  it('reads and appends to the log note', async () => {
+    const wiki = await makeWiki()
+
+    await wiki.appendLog('ingest', 'Article A')
+
+    const log = await wiki.readLog()
+    assert.match(log, /# Log/)
+    assert.match(log, /ingest \| Article A/)
   })
 })
 
@@ -416,6 +453,17 @@ describe('searchIndex', () => {
     const hits = await wiki.searchIndex('transformer')
     assert.equal(hits.length, 0)
   })
+
+  it('matches page content when fullText is enabled', async () => {
+    const wiki = await makeWiki()
+    await wiki.createPage('concept', 'BERT', '# BERT\n\nMentions transformer internals.', 'bidirectional encoder')
+
+    assert.equal((await wiki.searchIndex('transformer')).length, 0)
+
+    const hits = await wiki.searchIndex('transformer', { fullText: true })
+    assert.equal(hits.length, 1)
+    assert.equal(hits[0].title, 'BERT')
+  })
 })
 
 describe('lint', () => {
@@ -423,8 +471,12 @@ describe('lint', () => {
     const wiki = await makeWiki()
     await wiki.createPage('concept', 'Orphan Concept', '# Orphan\n\nno one links here', 'isolated')
 
-    const { orphanPages } = await wiki.lint()
+    const { orphanPages, issues } = await wiki.lint()
     assert.ok(orphanPages.some(p => p.title === 'Orphan Concept'))
+    assert.ok(issues.some(issue =>
+      issue.ruleId === 'orphan-page' &&
+      issue.evidence.title === 'Orphan Concept',
+    ))
   })
 
   it('does NOT flag raw pages as orphans', async () => {
@@ -448,9 +500,13 @@ describe('lint', () => {
     const wiki = await makeWiki()
     await wiki.createPage('concept', 'Known Page', '# Known\n\nSee [[Unknown Topic]] and [[Missing Entry]]', 'mentions unknowns')
 
-    const { undocumentedMentions } = await wiki.lint()
+    const { undocumentedMentions, issues } = await wiki.lint()
     assert.ok(undocumentedMentions.includes('Unknown Topic'))
     assert.ok(undocumentedMentions.includes('Missing Entry'))
+    assert.ok(issues.some(issue =>
+      issue.ruleId === 'missing-wikilink-target' &&
+      issue.evidence.title === 'Unknown Topic',
+    ))
   })
 
   it('does NOT flag [[Title]] when the title exists in the index', async () => {
@@ -462,10 +518,35 @@ describe('lint', () => {
     assert.equal(undocumentedMentions.filter(t => t === 'RAG').length, 0)
   })
 
+  it('detects markdown links to unknown note ids', async () => {
+    const wiki = await makeWiki()
+    await wiki.createPage('concept', 'Known Page', '# Known\n\nSee [Missing](note-missing)', 'mentions missing')
+
+    const { issues } = await wiki.lint()
+    assert.ok(issues.some(issue =>
+      issue.ruleId === 'broken-note-link' &&
+      issue.evidence.href === 'note-missing',
+    ))
+  })
+
+  it('detects duplicate index titles', async () => {
+    const wiki = await makeWiki()
+    await wiki.createPage('concept', 'RAG', '# RAG 1', 'first')
+    await wiki.createPage('entity', 'rag', '# RAG 2', 'second')
+
+    const { issues } = await wiki.lint()
+    assert.ok(issues.some(issue =>
+      issue.ruleId === 'duplicate-index-title' &&
+      issue.severity === 'error' &&
+      issue.evidence.noteIds.includes('note-'),
+    ))
+  })
+
   it('returns empty report for a fresh wiki', async () => {
     const wiki = await makeWiki()
     const report = await wiki.lint()
     assert.deepEqual(report.orphanPages, [])
     assert.deepEqual(report.undocumentedMentions, [])
+    assert.deepEqual(report.issues, [])
   })
 })

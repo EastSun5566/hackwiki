@@ -17,22 +17,34 @@ Use this skill when the user wants to:
 ## Steps
 
 1. Ensure `HACKMD_TOKEN` is available in the environment before invoking the CLI.
-2. Prefer machine-readable output by adding `--json` when the result needs to be parsed or chained.
-3. Use the Hackwiki CLI through one of these execution modes:
+2. Start every Hackwiki task with `hackwiki session --json` to load the schema, index, and recent log before deciding what to read or edit.
+3. Follow the schema note as the source of truth for page formats, ingest/query/lint workflows, link style, and index/log maintenance.
+4. Prefer machine-readable output by adding `--json` when the result needs to be parsed or chained.
+5. Use the Hackwiki CLI through one of these execution modes:
    - `hackwiki ...` if the CLI is already installed or available through `pnpm exec`
    - `npx @hackwiki/cli ...` when zero-install execution is preferred
-4. Map the user request to one of these commands:
+6. Map the user request to one of these commands:
    - `hackwiki session --json`
+   - `hackwiki schema read --json`
+   - `hackwiki schema update --file <path> --json`
+   - `hackwiki index read --json`
+   - `hackwiki log read --json`
+   - `hackwiki log append "<operation>" "<title>" --json`
+   - `hackwiki page list --json`
    - `hackwiki search "<query>" --json`
+   - `hackwiki search "<query>" --full-text --json`
    - `hackwiki lint --json`
    - `hackwiki page read <noteId> --json`
    - `hackwiki page create <raw|concept|entity|synthesis> "<title>" --summary "<summary>" --content "<markdown>" --json`
    - `hackwiki page update <noteId> --content "<markdown>" --json`
-5. Read errors from `stderr` and results from `stdout`.
-6. If the CLI reports a usage error, correct the command shape before retrying.
+7. For ingest work, create or update all affected pages, keep the index current, append a log entry, then run `hackwiki lint --json`.
+8. For query work, search the index first, use full-text search when the index is insufficient, read relevant pages, and file durable answers as synthesis pages.
+9. Read errors from `stderr` and results from `stdout`.
+10. If the CLI reports a usage error, correct the command shape before retrying.
 
 ## Notes
 
 - The CLI expects Hackwiki-managed metadata under `__HACKWIKI__/meta/`.
 - New pages are created directly under `__HACKWIKI__/`.
 - Use `--file <path>` instead of `--content` when the markdown already exists on disk.
+- Treat lint issues as maintenance hints and fix the ones with clear evidence.
