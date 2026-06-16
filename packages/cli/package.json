@@ -1,6 +1,6 @@
 {
   "name": "@hackwiki/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI for managing a Hackwiki knowledge base from the terminal or an agent shell",
   "type": "module",
   "main": "dist/index.js",
