@@ -1,126 +1,59 @@
 # Hackwiki
 
-> A HackMD-backed knowledge-base toolkit for SDK, CLI, and agent workflows
+> A CLI and agent skill for maintaining a persistent wiki in HackMD.
 
-Hackwiki is now organized as a pnpm workspace:
+## Use with an agent
 
-- `@hackwiki/sdk` — the TypeScript library
-- `@hackwiki/cli` — a thin CLI around the SDK
-- `skills/hackwiki` — agent skill
+Paste this prompt into an agent with shell access:
 
-## Layout
+```text
+Install the Hackwiki skill from EastSun5566/hackwiki with:
+`npx skills add EastSun5566/hackwiki --skill hackwiki`
 
-Hackwiki keeps all managed notes inside a dedicated HackMD folder tree:
+Follow the installed skill and use `npx @hackwiki/cli` with `--json`.
+Reuse my existing `hackmd-cli login`. If authentication is unavailable, stop
+and tell me how to set it up.
 
-- `__HACKWIKI__/meta/[hackwiki] schema`
-- `__HACKWIKI__/meta/[hackwiki] index`
-- `__HACKWIKI__/meta/[hackwiki] log`
-
-Regular wiki pages are created directly under `__HACKWIKI__/`.
-
-Pages have four types: `raw`, `concept`, `entity`, and `synthesis`.
-
-## Packages
-
-### `@hackwiki/sdk`
-
-Install the SDK in another project:
-
-```sh
-npm install @hackwiki/sdk
+Start with `npx @hackwiki/cli session --json`. Search before creating pages,
+update existing pages instead of creating duplicates, and run lint after every
+change. Inspect the wiki first and do not modify it until I confirm.
 ```
 
-```ts
-import { createWiki } from "@hackwiki/sdk";
-
-const wiki = createWiki({
-  token: process.env.HMD_API_ACCESS_TOKEN,
-});
-
-const session = await wiki.startSession();
-
-const { noteId } = await wiki.createPage(
-  "concept",
-  "Retrieval-Augmented Generation",
-  "# RAG\n\n...",
-  "Pattern for grounding LLM output in retrieved documents",
-);
-
-await wiki.updatePage(noteId, "# RAG\n\nUpdated content...");
-const schema = await wiki.readSchema();
-const pages = await wiki.listPages();
-const results = await wiki.searchIndex("retrieval");
-const fullTextResults = await wiki.searchIndex("grounding", { fullText: true });
-const { orphanPages, undocumentedMentions } = await wiki.lint();
-```
-
-### `@hackwiki/cli`
-
-Run the CLI without a global install:
-
-```sh
-npx @hackwiki/cli --help
-```
-
-Common commands:
-
-```sh
-hackwiki session --json
-hackwiki schema read --json
-hackwiki schema update --file ./schema.md --json
-hackwiki index read --json
-hackwiki log read --json
-hackwiki log append ingest "RAG Article" --json
-hackwiki page list --json
-hackwiki search "retrieval" --json
-hackwiki search "grounding" --full-text --json
-hackwiki page create concept "RAG" --summary "retrieval" --content "# RAG" --json
-hackwiki page update NOTE_ID --file ./note.md --json
-hackwiki page read NOTE_ID --json
-hackwiki lint --json
-```
-
-The CLI can reuse the official `hackmd-cli` login config:
+## Authentication
 
 ```sh
 hackmd-cli login
 npx @hackwiki/cli session --json
 ```
 
-Token precedence:
+For automation, set `HMD_API_ACCESS_TOKEN`. For HackMD EE, also set
+`HMD_API_ENDPOINT_URL` or use `--api-url`.
 
-1. `HMD_API_ACCESS_TOKEN`
-2. `~/.hackmd/config.json` from `hackmd-cli login`
-
-API URL precedence:
-
-1. `--api-url`
-2. `HMD_API_ENDPOINT_URL`
-3. `~/.hackmd/config.json`
-
-`lint --json` includes both the legacy `orphanPages` / `undocumentedMentions`
-fields and a rule-based `issues` list with severity, message, and evidence.
-
-## Skills
+## CLI
 
 ```sh
-npx skills add EastSun5566/hackwiki
+npx @hackwiki/cli session --json
+npx @hackwiki/cli search "retrieval" --json
+npx @hackwiki/cli search "grounding" --full-text --json
+npx @hackwiki/cli page read NOTE_ID --json
+npx @hackwiki/cli page create concept "RAG" \
+  --summary "Retrieval-augmented generation" \
+  --file ./rag.md \
+  --json
+npx @hackwiki/cli page update NOTE_ID --file ./rag.md --json
+npx @hackwiki/cli lint --json
 ```
 
-Once installed, the skill instructs the agent to prefer the Hackwiki CLI with machine-readable `--json` output when appropriate.
+Run `npx @hackwiki/cli --help` for all commands.
+
+Hackwiki stores its schema, index, log, and wiki pages in a dedicated
+`__HACKWIKI__/` folder in HackMD.
 
 ## Development
 
-Install dependencies once at the workspace root:
-
 ```sh
 pnpm install
-```
-
-Run the workspace checks:
-
-```sh
 pnpm build
-pnpm test
 pnpm lint
+pnpm test
 ```
