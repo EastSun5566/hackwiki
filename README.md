@@ -11,8 +11,9 @@ Install the Hackwiki skill from EastSun5566/hackwiki with:
 `npx skills add EastSun5566/hackwiki --skill hackwiki`
 
 Follow the installed skill and use `npx @hackwiki/cli` with `--json`.
-Reuse my existing `hackmd-cli login`. If authentication is unavailable, stop
-and tell me how to set it up.
+Reuse my existing HackMD token/login. If `session` lacks a token, ask me before
+following https://github.com/hackmdio/hackmd-cli/blob/develop/hackmd-cli/SKILL.md
+for CLI setup. I will create and enter the API token; then retry `session`.
 If I name a team, use `--team TEAM_PATH` for every command.
 
 Start with `npx @hackwiki/cli session --json`. Search before creating pages,
