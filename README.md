@@ -16,7 +16,8 @@ and tell me how to set it up.
 
 Start with `npx @hackwiki/cli session --json`. Search before creating pages,
 update existing pages instead of creating duplicates, and run lint after every
-change. Inspect the wiki first and do not modify it until I confirm.
+change. If the wiki is not initialized, ask me before running `init`. Inspect
+the wiki first and do not modify it until I confirm.
 ```
 
 ## Authentication
@@ -24,6 +25,7 @@ change. Inspect the wiki first and do not modify it until I confirm.
 ```sh
 hackmd-cli login
 npx @hackwiki/cli session --json
+npx @hackwiki/cli init --json  # only after confirmation, if needed
 ```
 
 For automation, set `HMD_API_ACCESS_TOKEN`. For HackMD EE, also set
@@ -33,6 +35,7 @@ For automation, set `HMD_API_ACCESS_TOKEN`. For HackMD EE, also set
 
 ```sh
 npx @hackwiki/cli session --json
+npx @hackwiki/cli init --json  # only after confirmation, if needed
 npx @hackwiki/cli search "retrieval" --json
 npx @hackwiki/cli search "grounding" --full-text --json
 npx @hackwiki/cli page read NOTE_ID --json

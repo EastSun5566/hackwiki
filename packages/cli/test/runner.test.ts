@@ -32,6 +32,9 @@ function createOutput() {
 
 function createWikiStub(overrides: Partial<CliWiki> = {}): CliWiki {
   return {
+    async initialize(): Promise<CliWikiSession> {
+      return { schema: '# Schema', index: [], recentLog: [] }
+    },
     async startSession(): Promise<CliWikiSession> {
       return {
         schema: '# Schema',
@@ -53,6 +56,9 @@ function createWikiStub(overrides: Partial<CliWiki> = {}): CliWiki {
     async updatePage(): Promise<void> {},
     async readPage(): Promise<string> {
       return '# Page'
+    },
+    async findIndexedPage() {
+      return undefined
     },
     async listPages() {
       return []
@@ -115,6 +121,25 @@ function createDependencies(
 }
 
 describe('runCliWithDependencies', () => {
+  it('initializes explicitly and returns the session as JSON', async () => {
+    const output = createOutput()
+    let calls = 0
+    const wiki = createWikiStub({
+      async initialize() {
+        calls += 1
+        return { schema: '# Schema', index: [], recentLog: [] }
+      },
+    })
+
+    const exitCode = await runCliWithDeps(['init', '--json'], createDependencies(wiki, output))
+
+    assert.equal(exitCode, 0)
+    assert.equal(calls, 1)
+    assert.deepEqual(JSON.parse(output.stdout.join('')), {
+      schema: '# Schema', index: [], recentLog: [],
+    })
+  })
+
   it('prints session data as JSON', async () => {
     const output = createOutput()
     const wiki = createWikiStub({
@@ -433,6 +458,76 @@ describe('runCliWithDependencies', () => {
     assert.deepEqual(calls, [{ noteId: 'note-99', content: '# From file' }])
     const json = JSON.parse(output.stdout.join(''))
     assert.deepEqual(json, { success: true, noteId: 'note-99' })
+  })
+
+  it('adds index metadata to JSON when reading an indexed page', async () => {
+    const output = createOutput()
+    const wiki = createWikiStub({
+      async readPage() { return '# RAG' },
+      async findIndexedPage() {
+        return { noteId: 'note-1', type: 'concept', title: 'RAG', summary: 'retrieval' }
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'read', 'note-1', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(JSON.parse(output.stdout.join('')), {
+      noteId: 'note-1', content: '# RAG', type: 'concept', title: 'RAG', summary: 'retrieval',
+    })
+  })
+
+  it('keeps the original JSON shape for an unindexed page', async () => {
+    const output = createOutput()
+    const exitCode = await runCliWithDeps(
+      ['page', 'read', 'note-2', '--json'],
+      createDependencies(createWikiStub(), output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(JSON.parse(output.stdout.join('')), {
+      noteId: 'note-2', content: '# Page',
+    })
+  })
+
+  it('gives an init hint for an uninitialized session', async () => {
+    const output = createOutput()
+    const wiki = createWikiStub({
+      async startSession() {
+        const error = new Error('Hackwiki is not initialized. Run `hackwiki init`.')
+        error.name = 'WikiNotInitializedError'
+        throw error
+      },
+    })
+
+    const exitCode = await runCliWithDeps(['session', '--json'], createDependencies(wiki, output))
+
+    assert.equal(exitCode, 1)
+    assert.equal(output.stdout.join(''), '')
+    assert.match(output.stderr.join(''), /hackwiki init/)
+  })
+
+  it('gives an init hint before an uninitialized write', async () => {
+    const output = createOutput()
+    const wiki = createWikiStub({
+      async createPage() {
+        const error = new Error('Hackwiki is not initialized. Run `hackwiki init`.')
+        error.name = 'WikiNotInitializedError'
+        throw error
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'create', 'concept', 'RAG', '--summary', 'retrieval', '--content', '# RAG', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 1)
+    assert.equal(output.stdout.join(''), '')
+    assert.match(output.stderr.join(''), /hackwiki init/)
   })
 
   it('returns a usage error when all token sources are missing', async () => {

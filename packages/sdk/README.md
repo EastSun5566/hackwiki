@@ -17,6 +17,8 @@ const wiki = createWiki({
   token: process.env.HMD_API_ACCESS_TOKEN,
 });
 
+// Only after the user approves creating the wiki, if it does not exist:
+await wiki.initialize();
 const session = await wiki.startSession();
 const schema = await wiki.readSchema();
 const pages = await wiki.listPages();
@@ -30,3 +32,5 @@ const hits = await wiki.searchIndex("retrieval", { fullText: true });
 ```
 
 The managed HackMD layout uses `__HACKWIKI__/meta/` for reserved notes and creates wiki pages directly under `__HACKWIKI__/`.
+`startSession()` and other read methods do not initialize the wiki. Write methods
+require initialization too; call `initialize()` explicitly when approved.

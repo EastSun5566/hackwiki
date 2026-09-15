@@ -24,7 +24,7 @@ Hackwiki is a persistent, HackMD-backed wiki maintained by agents. Raw sources a
 
 ## Page Types
 
-- raw: immutable or lightly cleaned source material. Do not rewrite the source meaning.
+- raw: immutable or lightly cleaned source material. Record where it came from and do not rewrite its meaning.
 - concept: reusable ideas, patterns, mechanisms, or topics.
 - entity: people, organizations, projects, products, places, or named objects.
 - synthesis: cross-page analysis, comparisons, timelines, decisions, or answers worth keeping.
@@ -42,19 +42,18 @@ Each managed page should use:
 ## Ingest Workflow
 
 1. Run \`hackwiki session --json\` and read the schema, index, and recent log.
-2. Read the source and identify the raw, concept, entity, and synthesis pages it affects.
-3. Create a raw page for the source when the source is new.
-4. Update existing concept/entity/synthesis pages instead of creating duplicates.
-5. Add new pages to the index with concise summaries.
-6. Append a log entry describing the ingest.
-7. Run \`hackwiki lint --json\` and fix actionable issues.
+2. Search before creating pages, then read the source and identify what is worth reusing.
+3. Create a raw page for a new source and record its origin.
+4. Update existing concept/entity/synthesis pages instead of creating duplicates. Link conclusions back to their sources and note conflicts before changing them.
+5. The CLI records new pages in the index and log automatically.
+6. Run \`hackwiki lint --json\`; fix issues caused by this change and report unrelated issues.
 
 ## Query Workflow
 
 1. Start with \`hackwiki session --json\`.
 2. Search the index first, then read relevant pages.
 3. Answer with citations to page titles or note IDs.
-4. If the answer is durable knowledge, file it as a synthesis page and update the index/log.
+4. Do not save a routine answer. Propose a synthesis page for durable knowledge only when the user asks to save it or confirms the change.
 
 ## Lint Workflow
 
@@ -84,6 +83,13 @@ export interface CreatePageResult {
   indexSize: number
 }
 
+export class WikiNotInitializedError extends Error {
+  constructor() {
+    super('Hackwiki is not initialized. Run `hackwiki init` or call `wiki.initialize()` after user confirmation.')
+    this.name = 'WikiNotInitializedError'
+  }
+}
+
 export class Wiki {
   readonly api: WikiClient
   readonly initialSchema: string
@@ -95,8 +101,13 @@ export class Wiki {
     this.initialSchema = config.initialSchema ?? DEFAULT_SCHEMA
   }
 
+  initialize = async (): Promise<WikiSession> => {
+    await this.bootstrap()
+    return this.startSession()
+  }
+
   startSession = async (): Promise<WikiSession> => {
-    const m = await this.ensureMeta()
+    const m = await this.requireMeta()
     const [schema, index, log] = await Promise.all([
       this.api.getNote(m.schemaId),
       this.api.getNote(m.indexId),
@@ -115,7 +126,7 @@ export class Wiki {
     content: string,
     summary: string,
   ): Promise<CreatePageResult> => {
-    const { rootFolderId } = await this.ensureMeta()
+    const { rootFolderId } = await this.requireMeta()
     const note = await this.api.createNote({
       title:           `[${type}] ${title}`,
       content,
@@ -132,7 +143,7 @@ export class Wiki {
   }
 
   updatePage = async (noteId: string, content: string): Promise<void> => {
-    await this.ensureMeta()
+    await this.requireMeta()
     await this.api.updateNote(noteId, { content })
     await this.appendLog('update', noteId)
   }
@@ -140,6 +151,13 @@ export class Wiki {
   readPage = async (noteId: string): Promise<string> => {
     const note = await this.api.getNote(noteId)
     return note.content ?? ''
+  }
+
+  findIndexedPage = async (noteId: string): Promise<WikiIndexEntry | undefined> => {
+    const meta = await this.findMeta()
+    if (!meta) return undefined
+    const note = await this.api.getNote(meta.indexId)
+    return parseIndex(note.content ?? '').find(entry => entry.noteId === noteId)
   }
 
   readPages = async (noteIds: string[]): Promise<Map<string, string>> => {
@@ -379,24 +397,51 @@ export class Wiki {
     return this.bootstrapping
   }
 
-  async ensureMeta(): Promise<WikiMeta> {
-    return this.meta ?? this.bootstrap()
+  async findMeta(): Promise<WikiMeta | null> {
+    if (this.meta) return this.meta
+
+    const folders = await this.api.getFolderList()
+    const root = this.findManagedFolder(folders, ROOT_FOLDER_NAME, null)
+    if (!root) return null
+    const metaFolder = this.findManagedFolder(folders, META_FOLDER_NAME, root.id)
+    if (!metaFolder) return null
+
+    const notes = await this.api.getNoteList()
+    const schema = this.findReservedNoteInFolder(notes, SCHEMA_TITLE, metaFolder.id)
+    const index = this.findReservedNoteInFolder(notes, INDEX_TITLE, metaFolder.id)
+    const log = this.findReservedNoteInFolder(notes, LOG_TITLE, metaFolder.id)
+    if (!schema || !index || !log) return null
+
+    this.meta = {
+      rootFolderId: root.id,
+      metaFolderId: metaFolder.id,
+      schemaId: schema.id,
+      indexId: index.id,
+      logId: log.id,
+    }
+    return this.meta
+  }
+
+  async requireMeta(): Promise<WikiMeta> {
+    const meta = await this.findMeta()
+    if (!meta) throw new WikiNotInitializedError()
+    return meta
   }
 
   async getIndex(): Promise<WikiIndexEntry[]> {
-    const { indexId } = await this.ensureMeta()
+    const { indexId } = await this.requireMeta()
     const note = await this.api.getNote(indexId)
     return parseIndex(note.content ?? '')
   }
 
   async readSchema(): Promise<string> {
-    const { schemaId } = await this.ensureMeta()
+    const { schemaId } = await this.requireMeta()
     const note = await this.api.getNote(schemaId)
     return note.content ?? ''
   }
 
   async updateSchema(content: string): Promise<void> {
-    const { schemaId } = await this.ensureMeta()
+    const { schemaId } = await this.requireMeta()
     await this.api.updateNote(schemaId, { content })
   }
 
@@ -405,18 +450,18 @@ export class Wiki {
   }
 
   async updateIndex(entries: WikiIndexEntry[]): Promise<void> {
-    const { indexId } = await this.ensureMeta()
+    const { indexId } = await this.requireMeta()
     await this.api.updateNote(indexId, { content: serializeIndex(entries) })
   }
 
   async readLog(): Promise<string> {
-    const { logId } = await this.ensureMeta()
+    const { logId } = await this.requireMeta()
     const note = await this.api.getNote(logId)
     return note.content ?? ''
   }
 
   async addToIndex(entry: WikiIndexEntry): Promise<WikiIndexEntry[]> {
-    const { indexId } = await this.ensureMeta()
+    const { indexId } = await this.requireMeta()
     const entries = await this.getIndex()
     const existing = entries.findIndex(e => e.noteId === entry.noteId)
     if (existing >= 0) entries[existing] = entry
@@ -426,7 +471,7 @@ export class Wiki {
   }
 
   async appendLog(operation: string, title: string): Promise<void> {
-    const { logId } = await this.ensureMeta()
+    const { logId } = await this.requireMeta()
     const note = await this.api.getNote(logId)
     const updated = (note.content ?? '') + formatLogEntry(operation, title)
     await this.api.updateNote(logId, { content: updated })

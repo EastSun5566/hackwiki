@@ -12,6 +12,7 @@ export {
   type WikiOptions,
   type SearchOptions,
   type CreatePageResult,
+  WikiNotInitializedError,
   Wiki,
   createWiki,
  } from './wiki.ts'

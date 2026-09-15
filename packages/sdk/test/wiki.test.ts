@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createWiki, type WikiClient } from '../src/index.ts'
+import { createWiki, WikiNotInitializedError, type WikiClient } from '../src/index.ts'
 
 const RESERVED_TITLES = ['[hackwiki] schema', '[hackwiki] index', '[hackwiki] log']
 const ROOT_FOLDER_NAME = '__HACKWIKI__'
@@ -119,7 +119,9 @@ function createMockClient(): WikiClient {
 
 async function makeWiki() {
   const mock = createMockClient()
-  return createWiki({ token: 'test-token' }, mock)
+  const wiki = createWiki({ token: 'test-token' }, mock)
+  await wiki.initialize()
+  return wiki
 }
 
 function parentFolderIdOf(note: Awaited<ReturnType<WikiClient['getNoteList']>>[number]) {
@@ -138,10 +140,10 @@ function findFolder(
 }
 
 describe('initialization', () => {
-  it('auto-initializes the reserved notes on first use', async () => {
+  it('initializes the reserved notes only when requested', async () => {
     const mock = createMockClient()
     const wiki = createWiki({ token: 'tok' }, mock)
-    const session = await wiki.startSession()
+    const session = await wiki.initialize()
     const notes = await mock.getNoteList()
     const folders = await mock.getFolderList()
     const rootFolder = findFolder(folders, ROOT_FOLDER_NAME, null)
@@ -165,11 +167,11 @@ describe('initialization', () => {
     const mock = createMockClient()
     const wiki = createWiki({ token: 'tok' }, mock)
 
-    await wiki.startSession()
+    await wiki.initialize()
     const before = await mock.getNoteList()
     const beforeFolders = await mock.getFolderList()
 
-    await wiki.startSession()
+    await wiki.initialize()
     const after = await mock.getNoteList()
     const afterFolders = await mock.getFolderList()
 
@@ -182,7 +184,7 @@ describe('initialization', () => {
   it('discovers existing reserved notes in a new wiki instance', async () => {
     const mock = createMockClient()
     const first = createWiki({ token: 'tok' }, mock)
-    await first.startSession()
+    await first.initialize()
     const before = await mock.getNoteList()
 
     const second = createWiki({ token: 'tok' }, mock)
@@ -201,7 +203,7 @@ describe('initialization', () => {
     await mock.createNote({ title: '[hackwiki] log', content: '# Legacy Log' })
 
     const wiki = createWiki({ token: 'tok' }, mock)
-    const session = await wiki.startSession()
+    const session = await wiki.initialize()
     const notes = await mock.getNoteList()
     const folders = await mock.getFolderList()
     const rootFolder = findFolder(folders, ROOT_FOLDER_NAME, null)
@@ -222,14 +224,14 @@ describe('initialization', () => {
     const mock = createMockClient()
     const wiki = createWiki({ token: 'tok', initialSchema: '# My Custom Schema' }, mock)
 
-    const session = await wiki.startSession()
+    const session = await wiki.initialize()
     assert.equal(session.schema, '# My Custom Schema')
   })
 
   it('does not overwrite existing schema in later instances', async () => {
     const mock = createMockClient()
     const first = createWiki({ token: 'tok', initialSchema: '# First Schema' }, mock)
-    await first.startSession()
+    await first.initialize()
 
     const second = createWiki({ token: 'tok', initialSchema: '# Second Schema' }, mock)
     const session = await second.startSession()
@@ -266,10 +268,53 @@ describe('initialization', () => {
     const wiki = createWiki({ token: 'tok' }, mock)
     await assert.rejects(() => wiki.startSession(), /multiple managed folders/i)
   })
+
+  it('does not create anything when a fresh session is read', async () => {
+    const mock = createMockClient()
+    const wiki = createWiki({ token: 'tok' }, mock)
+
+    await assert.rejects(() => wiki.startSession(), WikiNotInitializedError)
+    await assert.rejects(() => wiki.searchIndex('anything'), WikiNotInitializedError)
+    await assert.rejects(() => wiki.lint(), WikiNotInitializedError)
+    assert.deepEqual(await mock.getFolderList(), [])
+    assert.deepEqual(await mock.getNoteList(), [])
+  })
+
+  it('repairs a partial wiki only through explicit initialize', async () => {
+    const mock = createMockClient()
+    const root = await mock.createFolder({ name: ROOT_FOLDER_NAME })
+    const meta = await mock.createFolder({ name: META_FOLDER_NAME, parentFolderId: root.id })
+    const schema = await mock.createNote({
+      title: '[hackwiki] schema',
+      content: '# Existing Schema',
+      parentFolderId: meta.id,
+    })
+    const wiki = createWiki({ token: 'tok' }, mock)
+
+    await assert.rejects(() => wiki.startSession(), WikiNotInitializedError)
+    assert.equal((await mock.getNoteList()).length, 1)
+
+    const session = await wiki.initialize()
+    assert.equal(session.schema, '# Existing Schema')
+    assert.equal((await mock.getNote(schema.id)).content, '# Existing Schema')
+    assert.equal((await mock.getNoteList()).length, 3)
+    assert.equal((await mock.getFolderList()).length, 2)
+  })
+
+  it('rejects writes before initialization without changing notes or folders', async () => {
+    const mock = createMockClient()
+    const wiki = createWiki({ token: 'tok' }, mock)
+
+    await assert.rejects(() => wiki.createPage('concept', 'A', '# A', 'summary'), WikiNotInitializedError)
+    await assert.rejects(() => wiki.updateSchema('# New Schema'), WikiNotInitializedError)
+    await assert.rejects(() => wiki.appendLog('update', 'A'), WikiNotInitializedError)
+    assert.deepEqual(await mock.getFolderList(), [])
+    assert.deepEqual(await mock.getNoteList(), [])
+  })
 })
 
 describe('startSession', () => {
-  it('returns empty index and empty recentLog for a fresh wiki', async () => {
+  it('returns empty index and empty recentLog for an initialized wiki', async () => {
     const wiki = await makeWiki()
     const session = await wiki.startSession()
     assert.deepEqual(session.index, [])
@@ -279,7 +324,7 @@ describe('startSession', () => {
   it('returns the schema content', async () => {
     const mock = createMockClient()
     const wiki = createWiki({ token: 'tok', initialSchema: '# Schema v1' }, mock)
-    const { schema } = await wiki.startSession()
+    const { schema } = await wiki.initialize()
     assert.equal(schema, '# Schema v1')
   })
 })
@@ -324,6 +369,7 @@ describe('createPage', () => {
   it('returns a noteId and indexSize of 1 for the first page', async () => {
     const mock = createMockClient()
     const wiki = createWiki({ token: 'test-token' }, mock)
+    await wiki.initialize()
     const result = await wiki.createPage('concept', 'Self-Attention', '# Self-Attention\n\ncontent', 'Q/K/V mechanism')
     const notes = await mock.getNoteList()
     const folders = await mock.getFolderList()
@@ -395,6 +441,26 @@ describe('readPage', () => {
     const { noteId } = await wiki.createPage('raw', 'Article', '# Article\n\nfull text here', 'summary')
     const content = await wiki.readPage(noteId)
     assert.ok(content.includes('full text here'))
+  })
+
+  it('reads an unindexed note without initializing the wiki', async () => {
+    const mock = createMockClient()
+    const note = await mock.createNote({ title: 'Other note', content: '# Other' })
+    const wiki = createWiki({ token: 'tok' }, mock)
+
+    assert.equal(await wiki.readPage(note.id), '# Other')
+    assert.equal(await wiki.findIndexedPage(note.id), undefined)
+    assert.deepEqual(await mock.getFolderList(), [])
+    assert.equal((await mock.getNoteList()).length, 1)
+  })
+
+  it('finds index metadata for a managed page', async () => {
+    const wiki = await makeWiki()
+    const { noteId } = await wiki.createPage('concept', 'RAG', '# RAG', 'retrieval')
+
+    assert.deepEqual(await wiki.findIndexedPage(noteId), {
+      noteId, type: 'concept', title: 'RAG', summary: 'retrieval',
+    })
   })
 })
 

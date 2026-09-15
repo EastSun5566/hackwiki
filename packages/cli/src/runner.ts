@@ -34,10 +34,12 @@ export interface CliCreatePageResult {
 }
 
 export interface CliWiki {
+  initialize(): Promise<CliWikiSession>
   startSession(): Promise<CliWikiSession>
   createPage(type: CliWikiNoteType, title: string, content: string, summary: string): Promise<CliCreatePageResult>
   updatePage(noteId: string, content: string): Promise<void>
   readPage(noteId: string): Promise<string>
+  findIndexedPage(noteId: string): Promise<CliWikiIndexEntry | undefined>
   listPages(): Promise<CliWikiIndexEntry[]>
   searchIndex(query: string, options?: { fullText?: boolean }): Promise<CliWikiIndexEntry[]>
   lint(): Promise<CliLintReport>
@@ -62,6 +64,7 @@ class UserInputError extends Error {}
 const HELP_TEXT = `hackwiki CLI
 
 Usage:
+  hackwiki init [--json] [--api-url <url>]
   hackwiki session [--json] [--api-url <url>]
   hackwiki schema read [--json] [--api-url <url>]
   hackwiki schema update (--content <content> | --file <path>) [--json] [--api-url <url>]
@@ -180,6 +183,20 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
 
     const wiki = await createWikiFromEnv(deps, apiUrl)
     const [command, ...commandArgs] = rest
+
+    if (command === 'init') {
+      if (commandArgs.length > 0) {
+        throw new UserInputError('The init command does not take positional arguments.')
+      }
+
+      const session = await wiki.initialize()
+      if (json) {
+        writeJson(deps, session)
+      } else {
+        writeText(deps, 'Initialized Hackwiki.')
+      }
+      return 0
+    }
 
     if (command === 'session') {
       if (commandArgs.length > 0) {
@@ -417,7 +434,10 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
         const [noteId] = pageArgs
         const content = await wiki.readPage(noteId)
         if (json) {
-          writeJson(deps, { noteId, content })
+          const entry = await wiki.findIndexedPage(noteId)
+          writeJson(deps, entry
+            ? { noteId, content, type: entry.type, title: entry.title, summary: entry.summary }
+            : { noteId, content })
         } else {
           writeText(deps, content)
         }
@@ -430,7 +450,8 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
     throw new UserInputError(`Unknown command: ${command}.`)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (error instanceof UserInputError || error instanceof AuthConfigError) {
+    if (error instanceof UserInputError || error instanceof AuthConfigError ||
+        (error instanceof Error && error.name === 'WikiNotInitializedError')) {
       deps.stderr(`Error: ${message}\n`)
       deps.stderr('Run `hackwiki --help` for usage details.\n')
       return 1

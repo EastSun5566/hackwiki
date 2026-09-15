@@ -18,6 +18,7 @@ npx @hackwiki/cli --help
 
 ```sh
 hackwiki session --json
+hackwiki init --json  # only after user confirmation, if needed
 hackwiki schema read --json
 hackwiki schema update --file ./schema.md --json
 hackwiki index read --json
@@ -46,6 +47,10 @@ The CLI can reuse the official `hackmd-cli` login config:
 hackmd-cli login
 npx @hackwiki/cli session --json
 ```
+
+`session` and other read commands do not create a wiki. If it is not initialized,
+run `hackwiki init --json` after approval; write commands also require this step.
+`page read NOTE_ID --json` adds index metadata when the page is indexed.
 
 Token precedence:
 
