@@ -19,6 +19,7 @@ npx @hackwiki/cli --help
 ```sh
 hackwiki session --json
 hackwiki init --json  # only after user confirmation, if needed
+hackwiki init --team TEAM_PATH --json  # optional team workspace
 hackwiki schema read --json
 hackwiki schema update --file ./schema.md --json
 hackwiki index read --json
@@ -51,6 +52,8 @@ npx @hackwiki/cli session --json
 `session` and other read commands do not create a wiki. If it is not initialized,
 run `hackwiki init --json` after approval; write commands also require this step.
 `page read NOTE_ID --json` adds index metadata when the page is indexed.
+For a team wiki, pass `--team TEAM_PATH` to every command or set
+`HACKWIKI_TEAM_PATH`. The session output identifies the selected workspace.
 
 Token precedence:
 
@@ -62,3 +65,5 @@ API URL precedence:
 1. `--api-url`
 2. `HMD_API_ENDPOINT_URL`
 3. `~/.hackmd/config.json`
+
+Team precedence: `--team`, then `HACKWIKI_TEAM_PATH`, then personal workspace.

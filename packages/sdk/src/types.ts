@@ -68,6 +68,10 @@ export interface WikiIndexEntry {
   summary: string
 }
 
+export type WikiWorkspace =
+  | { type: 'personal' }
+  | { type: 'team'; teamPath: string }
+
 export type LintRuleId =
   | 'orphan-page'
   | 'missing-wikilink-target'
@@ -84,6 +88,7 @@ export interface LintIssue {
 }
 
 export interface WikiSession {
+  workspace: WikiWorkspace
   schema: string
   index: WikiIndexEntry[]
   recentLog: string[]

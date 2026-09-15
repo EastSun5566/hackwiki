@@ -13,6 +13,7 @@ Install the Hackwiki skill from EastSun5566/hackwiki with:
 Follow the installed skill and use `npx @hackwiki/cli` with `--json`.
 Reuse my existing `hackmd-cli login`. If authentication is unavailable, stop
 and tell me how to set it up.
+If I name a team, use `--team TEAM_PATH` for every command.
 
 Start with `npx @hackwiki/cli session --json`. Search before creating pages,
 update existing pages instead of creating duplicates, and run lint after every
@@ -26,10 +27,12 @@ the wiki first and do not modify it until I confirm.
 hackmd-cli login
 npx @hackwiki/cli session --json
 npx @hackwiki/cli init --json  # only after confirmation, if needed
+npx @hackwiki/cli init --team TEAM_PATH --json  # optional team workspace
 ```
 
 For automation, set `HMD_API_ACCESS_TOKEN`. For HackMD EE, also set
-`HMD_API_ENDPOINT_URL` or use `--api-url`.
+`HMD_API_ENDPOINT_URL` or use `--api-url`. Set `HACKWIKI_TEAM_PATH` to keep
+all commands in one team without repeating `--team`.
 
 ## CLI
 

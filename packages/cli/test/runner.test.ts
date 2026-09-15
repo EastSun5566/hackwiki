@@ -18,10 +18,12 @@ type CapturedOutput = {
 type WikiConfigCall = {
   token: string
   apiUrl?: string
+  teamPath?: string
 }
 
 const TEST_HOME = '/home/test'
 const HACKMD_CONFIG_PATH = `${TEST_HOME}/.hackmd/config.json`
+const PERSONAL_WORKSPACE = { type: 'personal' } as const
 
 function createOutput() {
   return {
@@ -33,10 +35,11 @@ function createOutput() {
 function createWikiStub(overrides: Partial<CliWiki> = {}): CliWiki {
   return {
     async initialize(): Promise<CliWikiSession> {
-      return { schema: '# Schema', index: [], recentLog: [] }
+      return { workspace: PERSONAL_WORKSPACE, schema: '# Schema', index: [], recentLog: [] }
     },
     async startSession(): Promise<CliWikiSession> {
       return {
+        workspace: PERSONAL_WORKSPACE,
         schema: '# Schema',
         index: [],
         recentLog: [],
@@ -127,7 +130,7 @@ describe('runCliWithDependencies', () => {
     const wiki = createWikiStub({
       async initialize() {
         calls += 1
-        return { schema: '# Schema', index: [], recentLog: [] }
+        return { workspace: PERSONAL_WORKSPACE, schema: '# Schema', index: [], recentLog: [] }
       },
     })
 
@@ -136,7 +139,7 @@ describe('runCliWithDependencies', () => {
     assert.equal(exitCode, 0)
     assert.equal(calls, 1)
     assert.deepEqual(JSON.parse(output.stdout.join('')), {
-      schema: '# Schema', index: [], recentLog: [],
+      workspace: PERSONAL_WORKSPACE, schema: '# Schema', index: [], recentLog: [],
     })
   })
 
@@ -145,6 +148,7 @@ describe('runCliWithDependencies', () => {
     const wiki = createWikiStub({
       async startSession() {
         return {
+          workspace: PERSONAL_WORKSPACE,
           schema: '# Schema',
           index: [{ noteId: 'note-1', type: 'concept', title: 'RAG', summary: 'retrieval' }],
           recentLog: ['## [2026-05-14] create | RAG'],
@@ -161,8 +165,31 @@ describe('runCliWithDependencies', () => {
     assert.equal(output.stderr.join(''), '')
     const json = JSON.parse(output.stdout.join(''))
     assert.equal(json.schema, '# Schema')
+    assert.deepEqual(json.workspace, PERSONAL_WORKSPACE)
     assert.equal(json.index.length, 1)
     assert.equal(json.recentLog.length, 1)
+  })
+
+  it('shows the selected workspace in a text session', async () => {
+    const output = createOutput()
+    const wiki = createWikiStub({
+      async startSession() {
+        return {
+          workspace: { type: 'team', teamPath: 'docs-team' },
+          schema: '# Schema',
+          index: [],
+          recentLog: [],
+        }
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['session', '--team', 'docs-team'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.match(output.stdout.join(''), /Workspace: team "docs-team"/)
   })
 
   it('uses HMD_API_ACCESS_TOKEN before hackmd-cli config token', async () => {
@@ -277,6 +304,93 @@ describe('runCliWithDependencies', () => {
 
     assert.equal(exitCode, 0)
     assert.equal(wikiConfigCalls[0].apiUrl, 'https://config.example/v1')
+  })
+
+  it('uses HACKWIKI_TEAM_PATH as the default team', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['session', '--json'],
+      createDependencies(
+        createWikiStub(),
+        output,
+        { HMD_API_ACCESS_TOKEN: 'tok', HACKWIKI_TEAM_PATH: 'env-team' },
+        {},
+        wikiConfigCalls,
+      ),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.equal(wikiConfigCalls[0].teamPath, 'env-team')
+  })
+
+  it('prefers --team over HACKWIKI_TEAM_PATH', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['session', '--team', ' cli-team ', '--json'],
+      createDependencies(
+        createWikiStub(),
+        output,
+        { HMD_API_ACCESS_TOKEN: 'tok', HACKWIKI_TEAM_PATH: 'env-team' },
+        {},
+        wikiConfigCalls,
+      ),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.equal(wikiConfigCalls[0].teamPath, 'cli-team')
+  })
+
+  it('accepts --team after command arguments', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'read', 'note-1', '--team', 'docs-team', '--json'],
+      createDependencies(createWikiStub(), output, undefined, {}, wikiConfigCalls),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.equal(wikiConfigCalls[0].teamPath, 'docs-team')
+  })
+
+  it('rejects an empty --team value before creating a client', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['session', '--team', '   ', '--json'],
+      createDependencies(createWikiStub(), output, undefined, {}, wikiConfigCalls),
+    )
+
+    assert.equal(exitCode, 1)
+    assert.deepEqual(wikiConfigCalls, [])
+    assert.match(output.stderr.join(''), /missing value for --team/i)
+  })
+
+  it('shows the selected team when initializing without JSON', async () => {
+    const output = createOutput()
+    const wiki = createWikiStub({
+      async initialize() {
+        return {
+          workspace: { type: 'team', teamPath: 'docs-team' },
+          schema: '# Schema',
+          index: [],
+          recentLog: [],
+        }
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['init', '--team', 'docs-team'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.equal(output.stdout.join(''), 'Initialized Hackwiki in team "docs-team".\n')
   })
 
   it('creates a page from inline content', async () => {

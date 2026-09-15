@@ -194,6 +194,35 @@ describe('createClient', () => {
     )
   })
 
+  it('routes every note and folder operation through an encoded team path', async () => {
+    const calls = installFetchMock(() => new Response('[]', {
+      status:  200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const client = createClient('secret-token', undefined, 'docs/team name')
+
+    await client.getNoteList()
+    await client.createNote({ title: 'Page' })
+    await client.getNote('note/id')
+    await client.updateNote('note/id', { content: '# Page' })
+    await client.getFolderList()
+    await client.createFolder({ name: 'Folder' })
+
+    assert.deepEqual(calls.map(call => ({
+      url:    String(call.input),
+      method: call.init?.method,
+    })), [
+      { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/notes', method: 'GET' },
+      { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/notes', method: 'POST' },
+      { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/notes/note%2Fid', method: 'GET' },
+      { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/notes/note%2Fid', method: 'PATCH' },
+      { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/folders', method: 'GET' },
+      { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/folders', method: 'POST' },
+    ])
+    assert.ok(calls.every(call => !String(call.input).startsWith('https://api.hackmd.io/v1/notes')))
+    assert.ok(calls.every(call => !String(call.input).startsWith('https://api.hackmd.io/v1/folders')))
+  })
+
   it('throws a useful error for non-ok responses', async () => {
     installFetchMock(() => new Response(
       JSON.stringify({ error: 'bad token' }),

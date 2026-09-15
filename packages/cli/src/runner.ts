@@ -10,6 +10,7 @@ export interface CliWikiIndexEntry {
 }
 
 export interface CliWikiSession {
+  workspace: { type: 'personal' } | { type: 'team'; teamPath: string }
   schema: string
   index: CliWikiIndexEntry[]
   recentLog: string[]
@@ -51,7 +52,7 @@ export interface CliWiki {
 }
 
 export interface CliDeps {
-  createWiki(config: { token: string; apiUrl?: string }): CliWiki
+  createWiki(config: { token: string; apiUrl?: string; teamPath?: string }): CliWiki
   env: Record<string, string | undefined>
   homeDir(): string
   readFile(filePath: string): Promise<string>
@@ -64,23 +65,24 @@ class UserInputError extends Error {}
 const HELP_TEXT = `hackwiki CLI
 
 Usage:
-  hackwiki init [--json] [--api-url <url>]
-  hackwiki session [--json] [--api-url <url>]
-  hackwiki schema read [--json] [--api-url <url>]
-  hackwiki schema update (--content <content> | --file <path>) [--json] [--api-url <url>]
-  hackwiki index read [--json] [--api-url <url>]
-  hackwiki log read [--json] [--api-url <url>]
-  hackwiki log append <operation> <title> [--json] [--api-url <url>]
-  hackwiki page list [--json] [--api-url <url>]
-  hackwiki page create <type> <title> --summary <summary> (--content <content> | --file <path>) [--json] [--api-url <url>]
-  hackwiki page update <noteId> (--content <content> | --file <path>) [--json] [--api-url <url>]
-  hackwiki page read <noteId> [--json] [--api-url <url>]
-  hackwiki search <query> [--full-text] [--json] [--api-url <url>]
-  hackwiki lint [--json] [--api-url <url>]
+  hackwiki init [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki session [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki schema read [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki schema update (--content <content> | --file <path>) [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki index read [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki log read [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki log append <operation> <title> [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki page list [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki page create <type> <title> --summary <summary> (--content <content> | --file <path>) [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki page update <noteId> (--content <content> | --file <path>) [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki page read <noteId> [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki search <query> [--full-text] [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki lint [--json] [--api-url <url>] [--team <teamPath>]
 
 Environment:
   HMD_API_ACCESS_TOKEN    hackmd-cli-compatible token
   HMD_API_ENDPOINT_URL    hackmd-cli-compatible API URL
+  HACKWIKI_TEAM_PATH      default HackMD team path
   ~/.hackmd/config.json   hackmd-cli login config fallback
 `
 
@@ -113,6 +115,7 @@ function parseGlobalOptions(args: string[]) {
   const rest: string[] = []
   let json = false
   let apiUrl: string | undefined
+  let teamPath: string | undefined
 
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index]
@@ -131,10 +134,20 @@ function parseGlobalOptions(args: string[]) {
       continue
     }
 
+    if (token === '--team') {
+      const value = args[index + 1]
+      if (value === undefined || value.startsWith('--') || !value.trim()) {
+        throw new UserInputError('Missing value for --team.')
+      }
+      teamPath = value.trim()
+      index += 1
+      continue
+    }
+
     rest.push(token)
   }
 
-  return { json, apiUrl, rest }
+  return { json, apiUrl, teamPath, rest }
 }
 
 function renderIndexEntry(entry: CliWikiIndexEntry): string {
@@ -168,20 +181,30 @@ async function loadContent(tokens: string[], deps: CliDeps): Promise<string> {
   throw new UserInputError('Missing content. Provide --content or --file.')
 }
 
-async function createWikiFromEnv(deps: CliDeps, apiUrl?: string): Promise<CliWiki> {
-  return deps.createWiki(await resolveAuthConfig(deps, apiUrl))
+async function createWikiFromEnv(
+  deps: CliDeps,
+  apiUrl?: string,
+  teamPath?: string,
+): Promise<CliWiki> {
+  return deps.createWiki(await resolveAuthConfig(deps, apiUrl, teamPath))
+}
+
+function renderWorkspace(workspace: CliWikiSession['workspace']): string {
+  return workspace.type === 'team'
+    ? `team "${workspace.teamPath}"`
+    : 'personal workspace'
 }
 
 export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<number> {
   try {
-    const { json, apiUrl, rest } = parseGlobalOptions(args)
+    const { json, apiUrl, teamPath, rest } = parseGlobalOptions(args)
 
     if (rest.length === 0 || rest[0] === '--help' || rest[0] === '-h' || rest[0] === 'help') {
       writeText(deps, HELP_TEXT.trimEnd())
       return 0
     }
 
-    const wiki = await createWikiFromEnv(deps, apiUrl)
+    const wiki = await createWikiFromEnv(deps, apiUrl, teamPath)
     const [command, ...commandArgs] = rest
 
     if (command === 'init') {
@@ -193,7 +216,7 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
       if (json) {
         writeJson(deps, session)
       } else {
-        writeText(deps, 'Initialized Hackwiki.')
+        writeText(deps, `Initialized Hackwiki in ${renderWorkspace(session.workspace)}.`)
       }
       return 0
     }
@@ -211,6 +234,8 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
           deps,
           [
             '# Session',
+            '',
+            `Workspace: ${renderWorkspace(session.workspace)}`,
             '',
             '## Schema',
             session.schema || '(empty)',

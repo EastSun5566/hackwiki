@@ -8,6 +8,7 @@ import type {
   LintIssue,
   NoteSummary,
   FolderSummary,
+  WikiWorkspace,
 } from './types.ts'
 
 const SCHEMA_TITLE = '[hackwiki] schema'
@@ -41,7 +42,7 @@ Each managed page should use:
 
 ## Ingest Workflow
 
-1. Run \`hackwiki session --json\` and read the schema, index, and recent log.
+1. Run \`hackwiki session --json\` with the current workspace options and read the schema, index, and recent log.
 2. Search before creating pages, then read the source and identify what is worth reusing.
 3. Create a raw page for a new source and record its origin.
 4. Update existing concept/entity/synthesis pages instead of creating duplicates. Link conclusions back to their sources and note conflicts before changing them.
@@ -50,7 +51,7 @@ Each managed page should use:
 
 ## Query Workflow
 
-1. Start with \`hackwiki session --json\`.
+1. Start with \`hackwiki session --json\` using the same workspace for the whole task.
 2. Search the index first, then read relevant pages.
 3. Answer with citations to page titles or note IDs.
 4. Do not save a routine answer. Propose a synthesis page for durable knowledge only when the user asks to save it or confirms the change.
@@ -76,6 +77,7 @@ export interface WikiOptions {
   token: string
   initialSchema?: string
   apiUrl?: string
+  teamPath?: string
 }
 
 export interface CreatePageResult {
@@ -84,8 +86,11 @@ export interface CreatePageResult {
 }
 
 export class WikiNotInitializedError extends Error {
-  constructor() {
-    super('Hackwiki is not initialized. Run `hackwiki init` or call `wiki.initialize()` after user confirmation.')
+  constructor(workspace: WikiWorkspace = { type: 'personal' }) {
+    const target = workspace.type === 'team'
+      ? `team "${workspace.teamPath}"`
+      : 'personal workspace'
+    super(`Hackwiki is not initialized in ${target}. Run \`hackwiki init\` or call \`wiki.initialize()\` after user confirmation.`)
     this.name = 'WikiNotInitializedError'
   }
 }
@@ -93,11 +98,20 @@ export class WikiNotInitializedError extends Error {
 export class Wiki {
   readonly api: WikiClient
   readonly initialSchema: string
+  readonly workspace: WikiWorkspace
   meta: WikiMeta | null = null
   bootstrapping: Promise<WikiMeta> | null = null
 
   constructor(config: WikiOptions, client?: WikiClient) {
-    this.api = client ?? createClient(config.token, config.apiUrl)
+    const teamPath = config.teamPath?.trim()
+    if (config.teamPath !== undefined && !teamPath) {
+      throw new Error('Team path cannot be empty.')
+    }
+
+    this.workspace = teamPath
+      ? { type: 'team', teamPath }
+      : { type: 'personal' }
+    this.api = client ?? createClient(config.token, config.apiUrl, teamPath)
     this.initialSchema = config.initialSchema ?? DEFAULT_SCHEMA
   }
 
@@ -114,6 +128,7 @@ export class Wiki {
       this.api.getNote(m.logId),
     ])
     return {
+      workspace: this.workspace,
       schema:    schema.content ?? '',
       index:     parseIndex(index.content ?? ''),
       recentLog: parseRecentLog(log.content ?? ''),
@@ -424,7 +439,7 @@ export class Wiki {
 
   async requireMeta(): Promise<WikiMeta> {
     const meta = await this.findMeta()
-    if (!meta) throw new WikiNotInitializedError()
+    if (!meta) throw new WikiNotInitializedError(this.workspace)
     return meta
   }
 

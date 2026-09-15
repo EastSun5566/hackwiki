@@ -9,6 +9,7 @@ export interface AuthDeps {
 export interface ResolvedAuthConfig {
   token: string
   apiUrl?: string
+  teamPath?: string
 }
 
 interface HackMDCliConfig {
@@ -67,6 +68,7 @@ function configString(config: HackMDCliConfig, key: keyof HackMDCliConfig): stri
 export async function resolveAuthConfig(
   deps: AuthDeps,
   cliApiUrl?: string,
+  cliTeamPath?: string,
 ): Promise<ResolvedAuthConfig> {
   const config = await readHackMDCliConfig(deps)
   const token = nonEmpty(deps.env.HMD_API_ACCESS_TOKEN)
@@ -82,5 +84,8 @@ export async function resolveAuthConfig(
     ?? nonEmpty(deps.env.HMD_API_ENDPOINT_URL)
     ?? configString(config, 'hackmdAPIEndpointURL')
 
-  return { token, apiUrl }
+  const teamPath = nonEmpty(cliTeamPath)
+    ?? nonEmpty(deps.env.HACKWIKI_TEAM_PATH)
+
+  return { token, apiUrl, teamPath }
 }

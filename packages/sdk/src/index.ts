@@ -1,6 +1,7 @@
 export type {
   WikiNoteType,
   WikiIndexEntry,
+  WikiWorkspace,
   WikiSession,
   LintReport,
   LintIssue,

@@ -26,10 +26,12 @@ export interface WikiClient {
 export class HackMDClient implements WikiClient {
   private readonly token: string
   private readonly apiUrl: string
+  private readonly teamPath?: string
 
   constructor(
     token: string,
     apiUrl = DEFAULT_API_URL,
+    teamPath?: string,
   ) {
     if (!token) {
       throw new Error('Missing access token when creating HackMD client')
@@ -37,30 +39,38 @@ export class HackMDClient implements WikiClient {
 
     this.token = token
     this.apiUrl = apiUrl.replace(/\/+$/, '')
+    this.teamPath = teamPath
+  }
+
+  private workspacePath(path: string): string {
+    const prefix = this.teamPath
+      ? `/teams/${encodeURIComponent(this.teamPath)}`
+      : ''
+    return `${prefix}${path}`
   }
 
   async getNoteList(): Promise<NoteSummary[]> {
-    return this.request<NoteSummary[]>('/notes')
+    return this.request<NoteSummary[]>(this.workspacePath('/notes'))
   }
 
   async createNote(opts: CreateNoteOptions): Promise<NoteDetails> {
-    return this.request<NoteDetails>('/notes', { method: 'POST', body: opts })
+    return this.request<NoteDetails>(this.workspacePath('/notes'), { method: 'POST', body: opts })
   }
 
   async getNote(id: string): Promise<NoteDetails> {
-    return this.request<NoteDetails>(`/notes/${encodeURIComponent(id)}`)
+    return this.request<NoteDetails>(this.workspacePath(`/notes/${encodeURIComponent(id)}`))
   }
 
   async updateNote(id: string, opts: UpdateNoteOptions): Promise<unknown> {
-    return this.request(`/notes/${encodeURIComponent(id)}`, { method: 'PATCH', body: opts })
+    return this.request(this.workspacePath(`/notes/${encodeURIComponent(id)}`), { method: 'PATCH', body: opts })
   }
 
   async getFolderList(): Promise<FolderSummary[]> {
-    return this.request<FolderSummary[]>('/folders')
+    return this.request<FolderSummary[]>(this.workspacePath('/folders'))
   }
 
   async createFolder(opts: CreateFolderOptions): Promise<FolderSummary> {
-    return this.request<FolderSummary>('/folders', { method: 'POST', body: opts })
+    return this.request<FolderSummary>(this.workspacePath('/folders'), { method: 'POST', body: opts })
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -90,6 +100,6 @@ export class HackMDClient implements WikiClient {
   }
 }
 
-export function createClient(token: string, apiUrl?: string) {
-  return new HackMDClient(token, apiUrl)
+export function createClient(token: string, apiUrl?: string, teamPath?: string) {
+  return new HackMDClient(token, apiUrl, teamPath)
 }

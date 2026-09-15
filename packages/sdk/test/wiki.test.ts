@@ -152,6 +152,7 @@ describe('initialization', () => {
       : undefined
 
     assert.match(session.schema, /# Hackwiki Schema/)
+    assert.deepEqual(session.workspace, { type: 'personal' })
     assert.match(session.schema, /Ingest Workflow/)
     assert.deepEqual(session.index, [])
     assert.deepEqual(session.recentLog, [])
@@ -179,6 +180,19 @@ describe('initialization', () => {
     assert.equal(after.length, 3)
     assert.equal(beforeFolders.length, 2)
     assert.equal(afterFolders.length, 2)
+  })
+
+  it('reuses the same reserved notes in a team workspace', async () => {
+    const mock = createMockClient()
+    const wiki = createWiki({ token: 'tok', teamPath: 'docs-team' }, mock)
+
+    const first = await wiki.initialize()
+    const second = await wiki.initialize()
+
+    assert.deepEqual(first.workspace, { type: 'team', teamPath: 'docs-team' })
+    assert.deepEqual(second.workspace, first.workspace)
+    assert.equal((await mock.getNoteList()).length, 3)
+    assert.equal((await mock.getFolderList()).length, 2)
   })
 
   it('discovers existing reserved notes in a new wiki instance', async () => {
@@ -326,6 +340,31 @@ describe('startSession', () => {
     const wiki = createWiki({ token: 'tok', initialSchema: '# Schema v1' }, mock)
     const { schema } = await wiki.initialize()
     assert.equal(schema, '# Schema v1')
+  })
+
+  it('reports the selected team workspace', async () => {
+    const mock = createMockClient()
+    const wiki = createWiki({ token: 'tok', teamPath: ' docs-team ' }, mock)
+
+    const session = await wiki.initialize()
+
+    assert.deepEqual(session.workspace, { type: 'team', teamPath: 'docs-team' })
+  })
+
+  it('rejects an empty team path', () => {
+    assert.throws(
+      () => createWiki({ token: 'tok', teamPath: '   ' }, createMockClient()),
+      /team path cannot be empty/i,
+    )
+  })
+
+  it('identifies the team in an uninitialized error', async () => {
+    const wiki = createWiki({ token: 'tok', teamPath: 'docs-team' }, createMockClient())
+
+    await assert.rejects(
+      () => wiki.startSession(),
+      /not initialized in team "docs-team"/i,
+    )
   })
 })
 
