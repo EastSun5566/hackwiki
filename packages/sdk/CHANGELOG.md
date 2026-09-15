@@ -1,5 +1,11 @@
 # @hackwiki/sdk
 
+## 0.3.0
+
+### Minor Changes
+
+- be4f7ae: Require explicit wiki initialization, keep read commands read-only, add optional team workspace routing, and include index metadata in CLI page-read JSON when available.
+
 ## 0.2.0
 
 ### Minor Changes
