@@ -8,7 +8,7 @@
     "changeset": "changeset",
     "lint": "pnpm -r run lint",
     "lint:fix": "pnpm -r run lint:fix",
-    "release": "pnpm build && pnpm lint && pnpm test && changeset publish",
+    "release": "pnpm build && pnpm lint && pnpm test && changeset tag",
     "test": "pnpm -r run test",
     "version": "changeset version"
   },

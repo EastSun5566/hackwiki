@@ -63,3 +63,8 @@ pnpm build
 pnpm lint
 pnpm test
 ```
+
+To release: run `pnpm exec changeset version`, commit/push, wait for CI, then
+run `pnpm release` and push the package tags. The tag workflow publishes to npm
+and creates GitHub Releases. Configure npm Trusted Publisher on both packages
+for `EastSun5566/hackwiki` / `release.yml`, allowing `npm publish`.

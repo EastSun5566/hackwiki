@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '@hackwiki/sdk@*'
+      - '@hackwiki/cli@*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: npm install --global npm@12.0.2
+
+      - name: Check tag
+        id: package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          case "$TAG" in
+            @hackwiki/sdk@*) package='@hackwiki/sdk'; dir='packages/sdk' ;;
+            @hackwiki/cli@*) package='@hackwiki/cli'; dir='packages/cli' ;;
+            *) exit 1 ;;
+          esac
+
+          version=$(node -p "require('./$dir/package.json').version")
+          test "$TAG" = "$package@$version"
+          git merge-base --is-ancestor HEAD origin/main
+
+          {
+            echo "package=$package"
+            echo "dir=$dir"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
+      - run: pnpm build && pnpm lint && pnpm test
+
+      - name: Wait for SDK
+        if: steps.package.outputs.package == '@hackwiki/cli'
+        run: |
+          sdk_version=$(node -p "require('./packages/sdk/package.json').version")
+          for attempt in $(seq 1 20); do
+            if npm view "@hackwiki/sdk@$sdk_version" version >/dev/null 2>&1; then
+              exit 0
+            fi
+            echo "Waiting for @hackwiki/sdk@$sdk_version ($attempt/20)"
+            sleep 30
+          done
+          echo "@hackwiki/sdk@$sdk_version is not available on npm" >&2
+          exit 1
+
+      - name: Publish to npm
+        env:
+          PACKAGE: ${{ steps.package.outputs.package }}
+          DIR: ${{ steps.package.outputs.dir }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          if npm view "$PACKAGE@$VERSION" version >/dev/null 2>&1; then
+            echo "$PACKAGE@$VERSION is already published"
+            exit 0
+          fi
+
+          pnpm --dir "$DIR" pack --out "$RUNNER_TEMP/package.tgz"
+          npm publish "$RUNNER_TEMP/package.tgz" --access public
+
+      - name: Wait for npm
+        env:
+          PACKAGE: ${{ steps.package.outputs.package }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          for attempt in $(seq 1 20); do
+            if npm view "$PACKAGE@$VERSION" version >/dev/null 2>&1; then
+              exit 0
+            fi
+            echo "Waiting for $PACKAGE@$VERSION ($attempt/20)"
+            sleep 30
+          done
+          echo "$PACKAGE@$VERSION is not available on npm" >&2
+          exit 1
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PACKAGE: ${{ steps.package.outputs.package }}
+          DIR: ${{ steps.package.outputs.dir }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already has a GitHub Release"
+          else
+            awk -v heading="## $VERSION" '
+              $0 == heading { show = 1 }
+              show && /^## / && $0 != heading { exit }
+              show { print }
+            ' "$DIR/CHANGELOG.md" > "$RUNNER_TEMP/release-notes.md"
+            test -s "$RUNNER_TEMP/release-notes.md"
+            gh release create "$TAG" --verify-tag --title "$PACKAGE $VERSION" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
