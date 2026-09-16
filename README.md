@@ -2,59 +2,27 @@
 
 > A CLI and agent skill for maintaining a persistent wiki in HackMD.
 
-## Use with an agent
-
-Paste this prompt into an agent with shell access:
-
-```text
-Install the Hackwiki skill from EastSun5566/hackwiki with:
-`npx skills add EastSun5566/hackwiki --skill hackwiki`
-
-Follow the installed skill and use `npx @hackwiki/cli` with `--json`.
-Reuse my existing HackMD token/login. If `session` lacks a token, ask me before
-following https://github.com/hackmdio/hackmd-cli/blob/develop/hackmd-cli/SKILL.md
-for CLI setup. I will create and enter the API token; then retry `session`.
-If I name a team, use `--team TEAM_PATH` for every command.
-
-Start with `npx @hackwiki/cli session --json`. Search before creating pages,
-update existing pages instead of creating duplicates, and run lint after every
-change. If the wiki is not initialized, ask me before running `init`. Inspect
-the wiki first and do not modify it until I confirm.
-```
-
-## Authentication
+## Install
 
 ```sh
-hackmd-cli login
-npx @hackwiki/cli session --json
-npx @hackwiki/cli init --json  # only after confirmation, if needed
-npx @hackwiki/cli init --team TEAM_PATH --json  # optional team workspace
+npx skills add EastSun5566/hackwiki --skill hackwiki
 ```
 
-For automation, set `HMD_API_ACCESS_TOKEN`. For HackMD EE, also set
-`HMD_API_ENDPOINT_URL` or use `--api-url`. Set `HACKWIKI_TEAM_PATH` to keep
-all commands in one team without repeating `--team`.
+Skills are installed in the current project by default. Add `-g` to use
+Hackwiki across projects.
+
+Then ask your agent to use Hackwiki. The installed skill handles authentication,
+workspace selection, initialization, search, updates, and validation. A HackMD
+API token is required; the skill will guide you if one is missing.
 
 ## CLI
 
 ```sh
-npx @hackwiki/cli session --json
-npx @hackwiki/cli init --json  # only after confirmation, if needed
-npx @hackwiki/cli search "retrieval" --json
-npx @hackwiki/cli search "grounding" --full-text --json
-npx @hackwiki/cli page read NOTE_ID --json
-npx @hackwiki/cli page create concept "RAG" \
-  --summary "Retrieval-augmented generation" \
-  --file ./rag.md \
-  --json
-npx @hackwiki/cli page update NOTE_ID --file ./rag.md --json
-npx @hackwiki/cli lint --json
+npx @hackwiki/cli --help
 ```
 
-Run `npx @hackwiki/cli --help` for all commands.
-
-Hackwiki stores its schema, index, log, and wiki pages in a dedicated
-`__HACKWIKI__/` folder in HackMD.
+See the [CLI](packages/cli/README.md) and [SDK](packages/sdk/README.md)
+documentation for direct usage.
 
 ## Development
 
