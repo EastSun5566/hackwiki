@@ -1,5 +1,11 @@
 # @hackwiki/sdk
 
+## 0.4.0
+
+### Minor Changes
+
+- 5ca135b: Add multi-term ranked search with type filters, summary updates, page rename/delete, stdin content, and command-specific help.
+
 ## 0.3.0
 
 ### Minor Changes
