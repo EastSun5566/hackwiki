@@ -57,6 +57,8 @@ function createWikiStub(overrides: Partial<CliWiki> = {}): CliWiki {
       }
     },
     async updatePage(): Promise<void> {},
+    async renamePage(): Promise<void> {},
+    async deletePage(): Promise<void> {},
     async readPage(): Promise<string> {
       return '# Page'
     },
@@ -97,6 +99,7 @@ function createDependencies(
   env: Record<string, string | undefined> = { HMD_API_ACCESS_TOKEN: 'tok' },
   files: Record<string, string> = {},
   wikiConfigCalls: WikiConfigCall[] = [],
+  stdin = '# From stdin',
 ): CliDeps {
   return {
     createWiki(config) {
@@ -114,6 +117,9 @@ function createDependencies(
       error.code = 'ENOENT'
       throw error
     },
+    async readStdin() {
+      return stdin
+    },
     stdout(text) {
       output.stdout.push(text)
     },
@@ -124,6 +130,32 @@ function createDependencies(
 }
 
 describe('runCliWithDependencies', () => {
+  it('shows page create help without authentication', async () => {
+    const output = createOutput()
+    const wikiConfigCalls: WikiConfigCall[] = []
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'create', '--help'],
+      createDependencies(createWikiStub(), output, {}, {}, wikiConfigCalls),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(wikiConfigCalls, [])
+    assert.match(output.stdout.join(''), /page create <type> <title>/)
+  })
+
+  it('reports a missing type when a flag occupies the positional slot', async () => {
+    const output = createOutput()
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'create', '--title', 'RAG', '--summary', 'retrieval', '--content', '# RAG'],
+      createDependencies(createWikiStub(), output),
+    )
+
+    assert.equal(exitCode, 1)
+    assert.match(output.stderr.join(''), /missing required positional argument <type>/i)
+  })
+
   it('initializes explicitly and returns the session as JSON', async () => {
     const output = createOutput()
     let calls = 0
@@ -423,6 +455,25 @@ describe('runCliWithDependencies', () => {
     assert.equal(json.indexSize, 7)
   })
 
+  it('creates a page from stdin with --file -', async () => {
+    const output = createOutput()
+    const calls: string[] = []
+    const wiki = createWikiStub({
+      async createPage(_type, _title, content) {
+        calls.push(content)
+        return { noteId: 'note-stdin', indexSize: 1 }
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'create', 'raw', 'Source', '--summary', 'source', '--file', '-', '--json'],
+      createDependencies(wiki, output, undefined, {}, [], '# Stdin body'),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(calls, ['# Stdin body'])
+  })
+
   it('reads schema data as JSON', async () => {
     const output = createOutput()
     const wiki = createWikiStub({
@@ -533,33 +584,33 @@ describe('runCliWithDependencies', () => {
     assert.equal(json[0].noteId, 'note-2')
   })
 
-  it('passes fullText through to search', async () => {
+  it('passes fullText and type through to search', async () => {
     const output = createOutput()
-    const calls: Array<{ query: string; fullText?: boolean }> = []
+    const calls: Array<{ query: string; fullText?: boolean; type?: string }> = []
     const wiki = createWikiStub({
       async searchIndex(query, options) {
-        calls.push({ query, fullText: options?.fullText })
+        calls.push({ query, fullText: options?.fullText, type: options?.type })
         return [{ noteId: 'note-3', type: 'concept', title: 'BERT', summary: 'encoder' }]
       },
     })
 
     const exitCode = await runCliWithDeps(
-      ['search', 'transformer', '--full-text', '--json'],
+      ['search', 'transformer', '--type', 'concept', '--full-text', '--json'],
       createDependencies(wiki, output),
     )
 
     assert.equal(exitCode, 0)
-    assert.deepEqual(calls, [{ query: 'transformer', fullText: true }])
+    assert.deepEqual(calls, [{ query: 'transformer', fullText: true, type: 'concept' }])
     const json = JSON.parse(output.stdout.join(''))
     assert.equal(json[0].title, 'BERT')
   })
 
   it('updates a page from a file path', async () => {
     const output = createOutput()
-    const calls: Array<{ noteId: string; content: string }> = []
+    const calls: Array<{ noteId: string; content?: string; summary?: string }> = []
     const wiki = createWikiStub({
-      async updatePage(noteId, content) {
-        calls.push({ noteId, content })
+      async updatePage(noteId, content, summary) {
+        calls.push({ noteId, content, summary })
       },
     })
 
@@ -569,9 +620,76 @@ describe('runCliWithDependencies', () => {
     )
 
     assert.equal(exitCode, 0)
-    assert.deepEqual(calls, [{ noteId: 'note-99', content: '# From file' }])
+    assert.deepEqual(calls, [{ noteId: 'note-99', content: '# From file', summary: undefined }])
     const json = JSON.parse(output.stdout.join(''))
     assert.deepEqual(json, { success: true, noteId: 'note-99' })
+  })
+
+  it('updates a page summary without content', async () => {
+    const output = createOutput()
+    const calls: Array<{ noteId: string; content?: string; summary?: string }> = []
+    const wiki = createWikiStub({
+      async updatePage(noteId, content, summary) {
+        calls.push({ noteId, content, summary })
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'update', 'note-99', '--summary', 'new summary', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(calls, [{ noteId: 'note-99', content: undefined, summary: 'new summary' }])
+  })
+
+  it('rejects a missing summary value', async () => {
+    const output = createOutput()
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'update', 'note-99', '--summary', '--json'],
+      createDependencies(createWikiStub(), output),
+    )
+
+    assert.equal(exitCode, 1)
+    assert.match(output.stderr.join(''), /missing value for --summary/i)
+  })
+
+  it('renames a page', async () => {
+    const output = createOutput()
+    const calls: Array<{ noteId: string; title: string; summary?: string }> = []
+    const wiki = createWikiStub({
+      async renamePage(noteId, title, summary) {
+        calls.push({ noteId, title, summary })
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'rename', 'note-99', 'New Title', '--summary', 'new summary', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(calls, [{ noteId: 'note-99', title: 'New Title', summary: 'new summary' }])
+  })
+
+  it('deletes a page', async () => {
+    const output = createOutput()
+    const calls: string[] = []
+    const wiki = createWikiStub({
+      async deletePage(noteId) {
+        calls.push(noteId)
+      },
+    })
+
+    const exitCode = await runCliWithDeps(
+      ['page', 'delete', 'note-99', '--json'],
+      createDependencies(wiki, output),
+    )
+
+    assert.equal(exitCode, 0)
+    assert.deepEqual(calls, ['note-99'])
+    assert.deepEqual(JSON.parse(output.stdout.join('')), { success: true, noteId: 'note-99' })
   })
 
   it('adds index metadata to JSON when reading an indexed page', async () => {

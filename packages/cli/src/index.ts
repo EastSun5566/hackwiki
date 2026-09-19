@@ -16,6 +16,12 @@ export async function runCli(args: string[]) {
     readFile(filePath) {
       return readFile(filePath, 'utf8')
     },
+    async readStdin() {
+      process.stdin.setEncoding('utf8')
+      let content = ''
+      for await (const chunk of process.stdin) content += chunk
+      return content
+    },
     stdout(text) {
       process.stdout.write(text)
     },

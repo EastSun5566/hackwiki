@@ -38,11 +38,13 @@ export interface CliWiki {
   initialize(): Promise<CliWikiSession>
   startSession(): Promise<CliWikiSession>
   createPage(type: CliWikiNoteType, title: string, content: string, summary: string): Promise<CliCreatePageResult>
-  updatePage(noteId: string, content: string): Promise<void>
+  updatePage(noteId: string, content?: string, summary?: string): Promise<void>
+  renamePage(noteId: string, title: string, summary?: string): Promise<void>
+  deletePage(noteId: string): Promise<void>
   readPage(noteId: string): Promise<string>
   findIndexedPage(noteId: string): Promise<CliWikiIndexEntry | undefined>
   listPages(): Promise<CliWikiIndexEntry[]>
-  searchIndex(query: string, options?: { fullText?: boolean }): Promise<CliWikiIndexEntry[]>
+  searchIndex(query: string, options?: { fullText?: boolean; type?: CliWikiNoteType }): Promise<CliWikiIndexEntry[]>
   lint(): Promise<CliLintReport>
   readSchema(): Promise<string>
   updateSchema(content: string): Promise<void>
@@ -56,6 +58,7 @@ export interface CliDeps {
   env: Record<string, string | undefined>
   homeDir(): string
   readFile(filePath: string): Promise<string>
+  readStdin(): Promise<string>
   stdout(text: string): void
   stderr(text: string): void
 }
@@ -74,9 +77,11 @@ Usage:
   hackwiki log append <operation> <title> [--json] [--api-url <url>] [--team <teamPath>]
   hackwiki page list [--json] [--api-url <url>] [--team <teamPath>]
   hackwiki page create <type> <title> --summary <summary> (--content <content> | --file <path>) [--json] [--api-url <url>] [--team <teamPath>]
-  hackwiki page update <noteId> (--content <content> | --file <path>) [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki page update <noteId> [(--content <content> | --file <path>)] [--summary <summary>] [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki page rename <noteId> <title> [--summary <summary>] [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki page delete <noteId> [--json] [--api-url <url>] [--team <teamPath>]
   hackwiki page read <noteId> [--json] [--api-url <url>] [--team <teamPath>]
-  hackwiki search <query> [--full-text] [--json] [--api-url <url>] [--team <teamPath>]
+  hackwiki search <query> [--type <type>] [--full-text] [--json] [--api-url <url>] [--team <teamPath>]
   hackwiki lint [--json] [--api-url <url>] [--team <teamPath>]
 
 Environment:
@@ -95,7 +100,7 @@ function extractOption(tokens: string[], name: string): string | undefined {
   if (index < 0) return undefined
 
   const value = tokens[index + 1]
-  if (value === undefined) {
+  if (value === undefined || value.startsWith('--')) {
     throw new UserInputError(`Missing value for ${name}.`)
   }
 
@@ -162,7 +167,11 @@ function writeText(deps: CliDeps, text: string) {
   deps.stdout(`${text}\n`)
 }
 
-async function loadContent(tokens: string[], deps: CliDeps): Promise<string> {
+async function loadContent(
+  tokens: string[],
+  deps: CliDeps,
+  required = true,
+): Promise<string | undefined> {
   const inlineContent = extractOption(tokens, '--content')
   const filePath = extractOption(tokens, '--file')
 
@@ -171,14 +180,25 @@ async function loadContent(tokens: string[], deps: CliDeps): Promise<string> {
   }
 
   if (filePath) {
-    return deps.readFile(filePath)
+    return filePath === '-' ? deps.readStdin() : deps.readFile(filePath)
   }
 
   if (inlineContent !== undefined) {
     return inlineContent
   }
 
-  throw new UserInputError('Missing content. Provide --content or --file.')
+  if (required) throw new UserInputError('Missing content. Provide --content or --file.')
+  return undefined
+}
+
+function writeCommandHelp(deps: CliDeps, rest: string[]): boolean {
+  const helpIndex = rest.findIndex(token => token === '--help' || token === '-h')
+  if (helpIndex < 0) return false
+
+  const prefix = `  hackwiki ${rest.slice(0, helpIndex).join(' ')}`
+  const usages = HELP_TEXT.split('\n').filter(line => line.startsWith(prefix))
+  writeText(deps, usages.length > 0 ? `Usage:\n${usages.join('\n')}` : HELP_TEXT.trimEnd())
+  return true
 }
 
 async function createWikiFromEnv(
@@ -203,6 +223,8 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
       writeText(deps, HELP_TEXT.trimEnd())
       return 0
     }
+
+    if (writeCommandHelp(deps, rest)) return 0
 
     const wiki = await createWikiFromEnv(deps, apiUrl, teamPath)
     const [command, ...commandArgs] = rest
@@ -251,12 +273,16 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
     if (command === 'search') {
       const tokens = [...commandArgs]
       const fullText = extractFlag(tokens, '--full-text')
+      const type = extractOption(tokens, '--type')
+      if (type !== undefined && !isWikiNoteType(type)) {
+        throw new UserInputError(`Invalid page type: ${type}. Expected raw, concept, entity, or synthesis.`)
+      }
       if (tokens.length === 0) {
         throw new UserInputError('The search command requires a query.')
       }
 
       const query = tokens.join(' ')
-      const results = await wiki.searchIndex(query, { fullText })
+      const results = await wiki.searchIndex(query, { fullText, type })
       if (json) {
         writeJson(deps, results)
       } else if (results.length === 0) {
@@ -289,7 +315,7 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
           throw new UserInputError(`Unexpected arguments for schema update: ${tokens.join(' ')}`)
         }
 
-        await wiki.updateSchema(content)
+        await wiki.updateSchema(content!)
         if (json) {
           writeJson(deps, { success: true })
         } else {
@@ -380,7 +406,7 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
     if (command === 'page') {
       const [subcommand, ...pageArgs] = commandArgs
       if (!subcommand) {
-        throw new UserInputError('The page command requires a subcommand (list, create, update, or read).')
+        throw new UserInputError('The page command requires a subcommand (list, create, update, rename, delete, or read).')
       }
 
       if (subcommand === 'list') {
@@ -402,9 +428,8 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
         const tokens = [...pageArgs]
         const type = tokens.shift()
         const title = tokens.shift()
-        if (!type || !title) {
-          throw new UserInputError('Usage: hackwiki page create <type> <title> --summary <summary> (--content <content> | --file <path>)')
-        }
+        if (!type || type.startsWith('-')) throw new UserInputError('Missing required positional argument <type> for page create.')
+        if (!title || title.startsWith('-')) throw new UserInputError('Missing required positional argument <title> for page create.')
         if (!isWikiNoteType(type)) {
           throw new UserInputError(`Invalid page type: ${type}. Expected raw, concept, entity, or synthesis.`)
         }
@@ -418,7 +443,7 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
           throw new UserInputError(`Unexpected arguments for page create: ${tokens.join(' ')}`)
         }
 
-        const result = await wiki.createPage(type, title, content, summary)
+        const result = await wiki.createPage(type, title, content!, summary)
         if (json) {
           writeJson(deps, {
             type,
@@ -436,18 +461,57 @@ export async function runCliWithDeps(args: string[], deps: CliDeps): Promise<num
         const tokens = [...pageArgs]
         const noteId = tokens.shift()
         if (!noteId) {
-          throw new UserInputError('Usage: hackwiki page update <noteId> (--content <content> | --file <path>)')
+          throw new UserInputError('Usage: hackwiki page update <noteId> [(--content <content> | --file <path>)] [--summary <summary>]')
         }
-        const content = await loadContent(tokens, deps)
+        const summary = extractOption(tokens, '--summary')
+        const content = await loadContent(tokens, deps, false)
+        if (content === undefined && summary === undefined) {
+          throw new UserInputError('Page update requires --content, --file, or --summary.')
+        }
         if (tokens.length > 0) {
           throw new UserInputError(`Unexpected arguments for page update: ${tokens.join(' ')}`)
         }
 
-        await wiki.updatePage(noteId, content)
+        await wiki.updatePage(noteId, content, summary)
         if (json) {
           writeJson(deps, { success: true, noteId })
         } else {
           writeText(deps, `Updated page ${noteId}.`)
+        }
+        return 0
+      }
+
+      if (subcommand === 'rename') {
+        const tokens = [...pageArgs]
+        const noteId = tokens.shift()
+        const title = tokens.shift()
+        if (!noteId || !title) {
+          throw new UserInputError('Usage: hackwiki page rename <noteId> <title> [--summary <summary>]')
+        }
+        const summary = extractOption(tokens, '--summary')
+        if (tokens.length > 0) {
+          throw new UserInputError(`Unexpected arguments for page rename: ${tokens.join(' ')}`)
+        }
+
+        await wiki.renamePage(noteId, title, summary)
+        if (json) {
+          writeJson(deps, { success: true, noteId, title, ...(summary === undefined ? {} : { summary }) })
+        } else {
+          writeText(deps, `Renamed page ${noteId} to "${title}".`)
+        }
+        return 0
+      }
+
+      if (subcommand === 'delete') {
+        if (pageArgs.length !== 1) {
+          throw new UserInputError('Usage: hackwiki page delete <noteId>')
+        }
+        const [noteId] = pageArgs
+        await wiki.deletePage(noteId)
+        if (json) {
+          writeJson(deps, { success: true, noteId })
+        } else {
+          writeText(deps, `Deleted page ${noteId}.`)
         }
         return 0
       }

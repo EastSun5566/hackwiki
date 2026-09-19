@@ -30,6 +30,9 @@ const result = await wiki.createPage(
   "Pattern for grounding LLM output in retrieved documents",
 );
 const hits = await wiki.searchIndex("retrieval", { fullText: true });
+await wiki.updatePage(result.noteId, undefined, "Updated summary");
+await wiki.renamePage(result.noteId, "RAG Guide");
+await wiki.deletePage(result.noteId);
 ```
 
 The managed HackMD layout uses `__HACKWIKI__/meta/` for reserved notes and creates wiki pages directly under `__HACKWIKI__/`.
@@ -37,3 +40,5 @@ The managed HackMD layout uses `__HACKWIKI__/meta/` for reserved notes and creat
 require initialization too; call `initialize()` explicitly when approved.
 The session's `workspace` field confirms whether this instance targets the
 personal workspace or a specific team.
+Search supports multi-term matching, deterministic ranking, and an optional
+`type` filter. Rename and delete update the HackMD note, index, and log.

@@ -10,7 +10,7 @@ import type {
 const DEFAULT_API_URL = 'https://api.hackmd.io/v1'
 
 type RequestOptions = {
-  method?: 'GET' | 'POST' | 'PATCH'
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   body?: unknown
 }
 
@@ -19,6 +19,7 @@ export interface WikiClient {
   createNote(opts: CreateNoteOptions): Promise<NoteDetails>
   getNote(id: string): Promise<NoteDetails>
   updateNote(id: string, opts: UpdateNoteOptions): Promise<unknown>
+  deleteNote(id: string): Promise<void>
   getFolderList(): Promise<FolderSummary[]>
   createFolder(opts: CreateFolderOptions): Promise<FolderSummary>
 }
@@ -63,6 +64,10 @@ export class HackMDClient implements WikiClient {
 
   async updateNote(id: string, opts: UpdateNoteOptions): Promise<unknown> {
     return this.request(this.workspacePath(`/notes/${encodeURIComponent(id)}`), { method: 'PATCH', body: opts })
+  }
+
+  async deleteNote(id: string): Promise<void> {
+    return this.request(this.workspacePath(`/notes/${encodeURIComponent(id)}`), { method: 'DELETE' })
   }
 
   async getFolderList(): Promise<FolderSummary[]> {

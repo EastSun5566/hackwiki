@@ -94,6 +94,10 @@ function createMockClient(): WikiClient {
       return {}
     },
 
+    async deleteNote(id) {
+      if (!notes.delete(id)) throw new Error(`Note not found: ${id}`)
+    },
+
     async getFolderList() {
       return [...folders.values()]
     },
@@ -472,6 +476,59 @@ describe('updatePage', () => {
     assert.equal(recentLog.length, 2)
     assert.match(recentLog[1], new RegExp(`update \\| ${noteId}$`))
   })
+
+  it('updates the summary without replacing page content', async () => {
+    const wiki = await makeWiki()
+    const { noteId } = await wiki.createPage('concept', 'RAG', '# RAG\n\nbody', 'old summary')
+
+    await wiki.updatePage(noteId, undefined, 'new summary')
+
+    assert.equal(await wiki.readPage(noteId), '# RAG\n\nbody')
+    assert.equal((await wiki.findIndexedPage(noteId))?.summary, 'new summary')
+  })
+
+  it('updates content and summary together', async () => {
+    const wiki = await makeWiki()
+    const { noteId } = await wiki.createPage('concept', 'RAG', '# old', 'old summary')
+
+    await wiki.updatePage(noteId, '# new', 'new summary')
+
+    assert.equal(await wiki.readPage(noteId), '# new')
+    assert.equal((await wiki.findIndexedPage(noteId))?.summary, 'new summary')
+  })
+})
+
+describe('renamePage and deletePage', () => {
+  it('renames a note and its index entry without changing its id', async () => {
+    const mock = createMockClient()
+    const wiki = createWiki({ token: 'test-token' }, mock)
+    await wiki.initialize()
+    const { noteId } = await wiki.createPage('concept', 'Old Title', '# Body', 'old summary')
+
+    await wiki.renamePage(noteId, 'New Title', 'new summary')
+
+    assert.equal((await mock.getNote(noteId)).title, '[concept] New Title')
+    assert.deepEqual(await wiki.findIndexedPage(noteId), {
+      noteId,
+      type: 'concept',
+      title: 'New Title',
+      summary: 'new summary',
+    })
+    assert.match((await wiki.startSession()).recentLog.at(-1) ?? '', /rename \| Old Title -> New Title$/)
+  })
+
+  it('deletes a note and removes it from the index', async () => {
+    const mock = createMockClient()
+    const wiki = createWiki({ token: 'test-token' }, mock)
+    await wiki.initialize()
+    const { noteId } = await wiki.createPage('concept', 'Delete Me', '# Body', 'summary')
+
+    await wiki.deletePage(noteId)
+
+    await assert.rejects(() => mock.getNote(noteId), /not found/i)
+    assert.equal(await wiki.findIndexedPage(noteId), undefined)
+    assert.match((await wiki.startSession()).recentLog.at(-1) ?? '', /delete \| Delete Me$/)
+  })
 })
 
 describe('readPage', () => {
@@ -568,6 +625,36 @@ describe('searchIndex', () => {
     const hits = await wiki.searchIndex('transformer', { fullText: true })
     assert.equal(hits.length, 1)
     assert.equal(hits[0].title, 'BERT')
+  })
+
+  it('matches every term across title and summary', async () => {
+    const wiki = await makeWiki()
+    await wiki.createPage('concept', 'HackMD API', '# API', 'OpenAPI documentation')
+    await wiki.createPage('concept', 'HackMD CLI', '# CLI', 'terminal client')
+
+    const hits = await wiki.searchIndex('HackMD OpenAPI')
+
+    assert.deepEqual(hits.map(hit => hit.title), ['HackMD API'])
+  })
+
+  it('orders exact titles before weaker matches', async () => {
+    const wiki = await makeWiki()
+    await wiki.createPage('concept', 'RAG Overview', '#', 'RAG')
+    await wiki.createPage('concept', 'RAG', '#', 'retrieval augmented generation')
+
+    const hits = await wiki.searchIndex('RAG')
+
+    assert.deepEqual(hits.map(hit => hit.title), ['RAG', 'RAG Overview'])
+  })
+
+  it('filters by page type', async () => {
+    const wiki = await makeWiki()
+    await wiki.createPage('raw', 'HackMD Source', '#', 'HackMD API')
+    await wiki.createPage('concept', 'HackMD API', '#', 'HackMD concept')
+
+    const hits = await wiki.searchIndex('HackMD', { type: 'concept' })
+
+    assert.deepEqual(hits.map(hit => hit.title), ['HackMD API'])
   })
 })
 

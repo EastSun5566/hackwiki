@@ -194,6 +194,16 @@ describe('createClient', () => {
     )
   })
 
+  it('deletes notes with DELETE', async () => {
+    const calls = installFetchMock(() => new Response(null, { status: 204 }))
+    const client = createClient('secret-token')
+
+    await client.deleteNote('note/id')
+
+    assert.equal(String(calls[0].input), 'https://api.hackmd.io/v1/notes/note%2Fid')
+    assert.equal(calls[0].init?.method, 'DELETE')
+  })
+
   it('routes every note and folder operation through an encoded team path', async () => {
     const calls = installFetchMock(() => new Response('[]', {
       status:  200,
@@ -205,6 +215,7 @@ describe('createClient', () => {
     await client.createNote({ title: 'Page' })
     await client.getNote('note/id')
     await client.updateNote('note/id', { content: '# Page' })
+    await client.deleteNote('note/id')
     await client.getFolderList()
     await client.createFolder({ name: 'Folder' })
 
@@ -216,6 +227,7 @@ describe('createClient', () => {
       { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/notes', method: 'POST' },
       { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/notes/note%2Fid', method: 'GET' },
       { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/notes/note%2Fid', method: 'PATCH' },
+      { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/notes/note%2Fid', method: 'DELETE' },
       { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/folders', method: 'GET' },
       { url: 'https://api.hackmd.io/v1/teams/docs%2Fteam%20name/folders', method: 'POST' },
     ])

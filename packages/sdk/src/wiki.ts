@@ -45,14 +45,14 @@ Each managed page should use:
 1. Run \`hackwiki session --json\` with the current workspace options and read the schema, index, and recent log.
 2. Search before creating pages, then read the source and identify what is worth reusing.
 3. Create a raw page for a new source and record its origin.
-4. Update existing concept/entity/synthesis pages instead of creating duplicates. Link conclusions back to their sources and note conflicts before changing them.
+4. Update or rename existing concept/entity/synthesis pages instead of creating duplicates. Never delete a page without explicit user confirmation. Link conclusions back to their sources and note conflicts before changing them.
 5. The CLI records new pages in the index and log automatically.
 6. Run \`hackwiki lint --json\`; fix issues caused by this change and report unrelated issues.
 
 ## Query Workflow
 
 1. Start with \`hackwiki session --json\` using the same workspace for the whole task.
-2. Search the index first, then read relevant pages.
+2. Search the index first, using a page-type filter when useful, then read relevant pages.
 3. Answer with citations to page titles or note IDs.
 4. Do not save a routine answer. Propose a synthesis page for durable knowledge only when the user asks to save it or confirms the change.
 
@@ -63,6 +63,7 @@ Treat lint output as maintenance hints. Fix missing wiki-link targets, broken no
 
 export interface SearchOptions {
   fullText?: boolean
+  type?: WikiNoteType
 }
 
 type WikiMeta = {
@@ -157,10 +158,56 @@ export class Wiki {
     return { noteId: note.id, indexSize: entries.length }
   }
 
-  updatePage = async (noteId: string, content: string): Promise<void> => {
-    await this.requireMeta()
-    await this.api.updateNote(noteId, { content })
+  updatePage = async (
+    noteId: string,
+    content?: string,
+    summary?: string,
+  ): Promise<void> => {
+    if (content === undefined && summary === undefined) {
+      throw new Error('Page update requires content or summary.')
+    }
+    if (summary !== undefined && !summary.trim()) {
+      throw new Error('Page summary cannot be empty.')
+    }
+
+    const entries = summary === undefined ? undefined : await this.getIndex()
+    const index = entries?.findIndex(entry => entry.noteId === noteId)
+    if (index === -1) throw new Error(`Page ${noteId} is not present in the Hackwiki index.`)
+
+    if (content !== undefined) {
+      await this.requireMeta()
+      await this.api.updateNote(noteId, { content })
+    }
+    if (entries && index !== undefined && summary !== undefined) {
+      entries[index] = { ...entries[index], summary }
+      await this.updateIndex(entries)
+    }
     await this.appendLog('update', noteId)
+  }
+
+  renamePage = async (noteId: string, title: string, summary?: string): Promise<void> => {
+    if (!title.trim()) throw new Error('Page title cannot be empty.')
+    if (summary !== undefined && !summary.trim()) throw new Error('Page summary cannot be empty.')
+
+    const entries = await this.getIndex()
+    const index = entries.findIndex(entry => entry.noteId === noteId)
+    if (index < 0) throw new Error(`Page ${noteId} is not present in the Hackwiki index.`)
+
+    const entry = entries[index]
+    await this.api.updateNote(noteId, { title: `[${entry.type}] ${title}` })
+    entries[index] = { ...entry, title, summary: summary ?? entry.summary }
+    await this.updateIndex(entries)
+    await this.appendLog('rename', `${entry.title} -> ${title}`)
+  }
+
+  deletePage = async (noteId: string): Promise<void> => {
+    const entries = await this.getIndex()
+    const entry = entries.find(item => item.noteId === noteId)
+    if (!entry) throw new Error(`Page ${noteId} is not present in the Hackwiki index.`)
+
+    await this.api.deleteNote(noteId)
+    await this.updateIndex(entries.filter(item => item.noteId !== noteId))
+    await this.appendLog('delete', entry.title)
   }
 
   readPage = async (noteId: string): Promise<string> => {
@@ -191,25 +238,34 @@ export class Wiki {
     query: string,
     options: SearchOptions = {},
   ): Promise<WikiIndexEntry[]> => {
-    const q = query.toLowerCase()
-    const entries = await this.getIndex()
-    const indexMatches = entries.filter(e =>
-      e.title.toLowerCase().includes(q) ||
-      e.summary.toLowerCase().includes(q),
+    const q = query.trim().toLowerCase()
+    const terms = q.split(/\s+/).filter(Boolean)
+    const entries = (await this.getIndex()).filter(entry =>
+      options.type === undefined || entry.type === options.type
     )
+    const contentById = options.fullText
+      ? await this.readPages(entries.map(entry => entry.noteId))
+      : new Map<string, string>()
 
-    if (!options.fullText) {
-      return indexMatches
-    }
-
-    const matchedIds = new Set(indexMatches.map(e => e.noteId))
-    const contentById = await this.readPages(entries.map(e => e.noteId))
-    const contentMatches = entries.filter(e => {
-      if (matchedIds.has(e.noteId)) return false
-      return (contentById.get(e.noteId) ?? '').toLowerCase().includes(q)
-    })
-
-    return [...indexMatches, ...contentMatches]
+    return entries
+      .map(entry => {
+        const title = entry.title.toLowerCase()
+        const summary = entry.summary.toLowerCase()
+        const content = (contentById.get(entry.noteId) ?? '').toLowerCase()
+        if (!terms.every(term => title.includes(term) || summary.includes(term) || content.includes(term))) {
+          return null
+        }
+        const score = (title === q ? 100 : 0) + terms.reduce((total, term) =>
+          total + (title.includes(term) ? 10 : summary.includes(term) ? 5 : 1), 0)
+        return { entry, score }
+      })
+      .filter((result): result is { entry: WikiIndexEntry; score: number } => result !== null)
+      .sort((a, b) =>
+        b.score - a.score ||
+        (a.entry.title < b.entry.title ? -1 : a.entry.title > b.entry.title ? 1 : 0) ||
+        (a.entry.noteId < b.entry.noteId ? -1 : a.entry.noteId > b.entry.noteId ? 1 : 0)
+      )
+      .map(result => result.entry)
   }
 
   lint = async (): Promise<LintReport> => {
